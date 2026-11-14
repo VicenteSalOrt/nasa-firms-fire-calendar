@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # 1. Configuración general de la página
-st.set_page_config(page_title="FIRMS Fire Calendar", page_icon="🔥", layout="wide")
+st.set_page_config(page_title="FIRMS Fire Calendar", layout="wide")
 
 # 2. Cargar dataset calibrado (contiene todo Chile: 16 regiones)
 @st.cache_data
@@ -84,22 +84,59 @@ def filter_by_polygon(df_in, poly):
         p1x, p1y = p2x, p2y
     return df_in[inside]
 
-# 4. Barra superior visible (Idioma + Título) para no esconder nada en celular
-top_col1, top_col2 = st.columns([3.2, 1])
-with top_col2:
-    lang = st.radio("🌐 Language / Idioma", ["English", "Español"], horizontal=True)
+# 4. Cabecera Minimalista: Título + Idioma + Accesibilidad Visual (Estándar vs. Daltonismo)
+head_title, head_lang, head_color = st.columns([2.4, 1.1, 1.5])
+
+with head_lang:
+    lang = st.radio("Idioma / Language", ["English", "Español"], horizontal=True)
 is_es = (lang == "Español")
 
-with top_col1:
-    st.title(
-        "🔥 Calendario Satelital de Incendios en Chile"
-        if is_es else
-        "🔥 Harmonized Wildfire Activity Calendar (2000–2026)"
+with head_color:
+    palette_mode = st.radio(
+        "Escala de color" if is_es else "Color scale",
+        ["standard", "colorblind"],
+        format_func=lambda k: (
+            ("Estándar (Amarillo–Rojo)" if is_es else "Standard (Yellow–Red)")
+            if k == "standard" else
+            ("Daltonismo (Azul–Amarillo)" if is_es else "Colorblind-safe (Cividis)")
+        ),
+        horizontal=True
     )
 
+color_scale = "YlOrRd" if palette_mode == "standard" else "Cividis"
+accent_line_color = "#D7301F" if palette_mode == "standard" else "#FDE725"
+
+if palette_mode == "standard":
+    color_guide_text = (
+        "Amarillo claro = calma o pocos focos  |  Naranja = actividad moderada  |  Rojo oscuro = concentración crítica."
+        if is_es else
+        "Light yellow = calm / low activity  |  Orange = moderate  |  Dark red = critical concentration."
+    )
+else:
+    color_guide_text = (
+        "Azul oscuro = calma o pocos focos  |  Gris = actividad moderada  |  Amarillo brillante = concentración crítica (paleta Cividis)."
+        if is_es else
+        "Dark blue = calm / low activity  |  Grey = moderate  |  Bright yellow = critical concentration (Cividis palette)."
+    )
+
+with head_title:
+    st.title(
+        "Calendario Satelital de Incendios en Chile"
+        if is_es else
+        "Harmonized Wildfire Activity Calendar"
+    )
+    st.caption(
+        "Serie histórica calibrada NASA FIRMS (2000–2026) · Guía paso a paso"
+        if is_es else
+        "Calibrated NASA FIRMS historical record (2000–2026) · Step-by-step guide"
+    )
+
+st.markdown("---")
+
+# 5. Guía Paso a Paso en Pantalla Principal
 preset_keys = list(REGIONS_BOUNDS.keys()) + ["Custom Coordinates"]
 preset_labels = {
-    "All Chile": "🇨🇱 Todo Chile (País Completo)" if is_es else "🇨🇱 All Chile (Full Country)",
+    "All Chile": "Todo Chile (País Completo)" if is_es else "All Chile (Full Country)",
     "Arica y Parinacota": "XV · Arica y Parinacota",
     "Tarapacá": "I · Tarapacá",
     "Antofagasta": "II · Antofagasta",
@@ -116,28 +153,27 @@ preset_labels = {
     "Los Lagos": "X · Los Lagos",
     "Aysén": "XI · Aysén",
     "Magallanes": "XII · Magallanes",
-    "Custom Coordinates": "🧭 Coordenadas Personalizadas" if is_es else "🧭 Custom Coordinates",
+    "Custom Coordinates": "Coordenadas Personalizadas" if is_es else "Custom Coordinates",
 }
 
-# 5. Paso 1 y Paso 2 visibles directamente en pantalla (ideal para celular y ciudadanía)
-ctrl_a, ctrl_b = st.columns([1.3, 1.7])
+step1_col, step2_col = st.columns([1.3, 1.7])
 
-with ctrl_a:
+with step1_col:
     preset = st.selectbox(
-        "📍 Paso 1 · Elige tu Región o Territorio:" if is_es else "📍 Step 1 · Choose Region or Territory:",
+        "Paso 1 · Selecciona territorio o región:" if is_es else "Step 1 · Select territory or region:",
         preset_keys,
         index=preset_keys.index("Biobío"),
         format_func=lambda k: preset_labels[k]
     )
 
-with ctrl_b:
+with step2_col:
     audience = st.radio(
-        "👤 Paso 2 · ¿Cómo quieres ver la información?" if is_es else "👤 Step 2 · Choose your profile:",
+        "Paso 2 · Elige el nivel de detalle:" if is_es else "Step 2 · Choose level of detail:",
         ["citizen", "municipal", "scientist"],
         format_func=lambda k: {
-            "citizen": "🏡 Ciudadanía (Simple)" if is_es else "🏡 Citizens (Plain Language)",
-            "municipal": "🏛️ Municipios y Emergencias" if is_es else "🏛️ Municipalities & Emergency",
-            "scientist": "🔬 Investigadores / Datos" if is_es else "🔬 Researchers / Data",
+            "citizen": "Ciudadanía (Simple)" if is_es else "Citizens (Plain Language)",
+            "municipal": "Municipios y Emergencias" if is_es else "Municipalities & Emergency",
+            "scientist": "Investigadores y Datos" if is_es else "Researchers & Data",
         }[k],
         horizontal=True
     )
@@ -151,13 +187,12 @@ else:
     lon_min = c_lon1.number_input("Longitud Mínima" if is_es else "Min Longitude", value=-73.8, format="%.2f")
     lon_max = c_lon2.number_input("Longitud Máxima" if is_es else "Max Longitude", value=-71.0, format="%.2f")
 
-# Métrica técnica solo visible en perfil Municipal o Científico
 if audience == "citizen":
     value_col = "harmonized_hotspots"
     unit_label = "Focos de calor" if is_es else "Fire hotspots"
 else:
     metric_key = st.radio(
-        "⚙️ Métrica a analizar:" if is_es else "⚙️ Analysis metric:",
+        "Variable a visualizar:" if is_es else "Variable to visualize:",
         ["hotspots", "frp"],
         format_func=lambda k: (
             ("Focos Calibrados (Conteo de detecciones)" if is_es else "Calibrated Hotspots (Count)")
@@ -169,8 +204,6 @@ else:
     value_col = "harmonized_hotspots" if metric_key == "hotspots" else "harmonized_frp"
     unit_label = ("Focos" if is_es else "Hotspots") if metric_key == "hotspots" else "MW"
 
-st.markdown("---")
-
 # 6. Filtrado Espacial (Caja + Polígono Regional Exacto)
 df_filtered = df[
     (df['lat_bin'].between(lat_min, lat_max)) &
@@ -181,9 +214,9 @@ if preset in REGION_POLYGONS:
 
 if df_filtered.empty:
     st.warning(
-        "⚠️ No se detectaron focos de calor en la zona seleccionada durante los 26 años analizados."
+        "No se registraron focos de calor en la zona seleccionada durante los 26 años analizados."
         if is_es else
-        "⚠️ No fire hotspots detected in the selected area across the 26-year record."
+        "No fire hotspots detected in the selected area across the 26-year record."
     )
     st.stop()
 
@@ -215,33 +248,31 @@ annual_totals = monthly_totals.groupby('year')[value_col].sum()
 complete_years = annual_totals[annual_totals.index < 2026]
 annual_median_baseline = complete_years.median() if not complete_years.empty else annual_totals.median()
 
-# Botones rápidos interactivos (1 clic para explorar escenarios clave)
+# Paso 3: Selección de año y mes (con atajos de 1 clic en perfil ciudadano)
 if "selected_year_state" not in st.session_state:
     st.session_state["selected_year_state"] = int(default_year)
 
 if audience == "citizen":
-    st.markdown("**⚡ Exploración rápida con 1 clic:**" if is_es else "**⚡ 1-Click Quick Exploration:**")
     q1, q2, q3 = st.columns(3)
-    if q1.button("📅 Ver este año (2026)" if is_es else "📅 Current Year (2026)", use_container_width=True):
+    if q1.button("Atajo: Año actual (2026)" if is_es else "Shortcut: Current year (2026)", width='stretch'):
         st.session_state["selected_year_state"] = int(max(years_available))
     worst_yr = int(annual_totals.idxmax())
-    if q2.button(f"🔥 Ver peor año ({worst_yr})" if is_es else f"🔥 Worst Year ({worst_yr})", use_container_width=True):
+    if q2.button(f"Atajo: Peor año histórico ({worst_yr})" if is_es else f"Shortcut: Worst historical year ({worst_yr})", width='stretch'):
         st.session_state["selected_year_state"] = worst_yr
-    if q3.button("🌱 Ver año tranquilo (2016)" if is_es else "🌱 Calm Year (2016)", use_container_width=True):
+    if q3.button("Atajo: Año tranquilo (2016)" if is_es else "Shortcut: Calm year (2016)", width='stretch'):
         st.session_state["selected_year_state"] = 2016 if 2016 in years_available else int(min(years_available))
 
-# Controles de Año y Mes
 col_ctrl1, col_ctrl2 = st.columns([3, 1])
 with col_ctrl1:
     selected_year = st.slider(
-        "📅 Paso 3 · Elige el año que quieres revisar:" if (is_es and audience == "citizen") else ("📅 Selecciona Año a Evaluar:" if is_es else "📅 Select Year to Inspect:"),
+        "Paso 3 · Selecciona el año a revisar:" if is_es else "Step 3 · Select year to inspect:",
         int(min(years_available)),
         int(max(years_available)),
         key="selected_year_state"
     )
 with col_ctrl2:
     month_idx_choice = st.selectbox(
-        "🗓️ Mes:" if is_es else "🗓️ Month:",
+        "Filtrar por mes:" if is_es else "Filter by month:",
         options=list(range(0, 13)),
         format_func=lambda m: ("Todo el Año" if is_es else "Full Year") if m == 0 else month_names[m - 1]
     )
@@ -274,7 +305,7 @@ else:
 
 region_display = preset_labels[preset]
 
-# 7. Semáforo de Alerta Adaptado al Público
+# 7. Diagnóstico Comparativo (Semáforo Sobrio)
 if median_baseline > 0:
     ratio = total_selected / median_baseline
     pct_diff = (ratio - 1.0) * 100
@@ -283,77 +314,74 @@ if median_baseline > 0:
     if ratio >= 2.0:
         if audience == "citizen":
             st.error(
-                f"🔴 **PELIGRO EXTREMO en {region_display} ({period_title}):** "
-                f"Hubo **{ratio:.1f} veces más fuego** que en un año normal.\n\n"
-                f"🛡️ **Qué significa para tu familia:** En esta región, el **{top3_share:.0f}%** de los incendios ocurre entre **{top3_names}**. "
-                f"Es urgente mantener cortafuegos limpios y evitar quemas o chispas cerca de pastizales."
+                f"**NIVEL CRÍTICO EXTREMO en {region_display} ({period_title}):** "
+                f"Se registraron **{ratio:.1f} veces más focos** que en un año normal.\n\n"
+                f"En esta región, el **{top3_share:.0f}%** de los incendios ocurre entre **{top3_names}**. "
+                f"Es fundamental mantener cortafuegos limpios y evitar cualquier uso de fuego o chispas antes de esos meses."
                 if is_es else
-                f"🔴 **EXTREME FIRE DANGER in {region_display} ({period_title}):** "
-                f"Fire activity was **{ratio:.1f}x higher** than a typical year.\n\n"
-                f"🛡️ **What this means:** Peak fire months here are **{top3_names}** (**{top3_share:.0f}%** of annual fires)."
+                f"**EXTREME CRITICAL LEVEL in {region_display} ({period_title}):** "
+                f"Activity was **{ratio:.1f}x higher** than a typical year. Peak fire months here are **{top3_names}** (**{top3_share:.0f}%**)."
             )
         elif audience == "municipal":
             st.error(
-                f"🔴 **EMERGENCIA / ANOMALÍA EXTREMA en {region_display} ({period_title}):** "
-                f"Actividad **{pct_diff:+.1f}%** sobre la mediana histórica (**{ratio:.1f}x** lo habitual).\n\n"
-                f"📋 **Priorización Operativa:** El **{top3_share:.0f}%** de la carga anual ocurre en **{top3_names}**. "
-                f"Activar alerta temprana comunal y priorizar cortafuegos en los cuadrantes amarillos del mapa."
+                f"**ANOMALÍA EXTREMA en {region_display} ({period_title}):** "
+                f"**{pct_diff:+.1f}%** sobre la mediana histórica (**{ratio:.1f}x** lo habitual). "
+                f"El **{top3_share:.0f}%** de la carga anual ocurre en **{top3_names}**; priorizar cortafuegos en las celdas destacadas del mapa."
                 if is_es else
-                f"🔴 **EMERGENCY / EXTREME ANOMALY in {region_display} ({period_title}):** "
-                f"Activity is **{pct_diff:+.1f}%** above historical median (**{ratio:.1f}x** baseline)."
+                f"**EXTREME ANOMALY in {region_display} ({period_title}):** "
+                f"**{pct_diff:+.1f}%** above historical median (**{ratio:.1f}x** baseline). **{top3_share:.0f}%** concentrates in **{top3_names}**."
             )
         else:
             st.error(
-                f"🔴 **ANOMALÍA TÉRMICA EXTREMA en {region_display} ({period_title}):** "
-                f"`{pct_diff:+.1f}%` vs. mediana 2000–2025 (`{ratio:.2f}x` línea base). "
-                f"Ventana estacional dominante: **{top3_names}** (`{top3_share:.1f}%`)."
+                f"**ANOMALÍA TÉRMICA EXTREMA en {region_display} ({period_title}):** "
+                f"`{pct_diff:+.1f}%` vs. mediana 2000–2025 (`{ratio:.2f}x` línea base). Ventana dominante: **{top3_names}** (`{top3_share:.1f}%`)."
                 if is_es else
-                f"🔴 **EXTREME THERMAL ANOMALY in {region_display} ({period_title}):** "
-                f"`{pct_diff:+.1f}%` vs. 2000–2025 median (`{ratio:.2f}x` baseline)."
+                f"**EXTREME THERMAL ANOMALY in {region_display} ({period_title}):** "
+                f"`{pct_diff:+.1f}%` vs. 2000–2025 median (`{ratio:.2f}x` baseline). Dominant window: **{top3_names}** (`{top3_share:.1f}%`)."
             )
     elif ratio >= 1.25:
         st.warning(
-            f"🟠 **ACTIVIDAD SOBRE LO NORMAL en {region_display} ({period_title}):** "
-            f"**{pct_diff:+.1f}%** ({ratio:.1f}x lo habitual). Meses críticos locales: **{top3_names}** (**{top3_share:.0f}%**)."
+            f"**ACTIVIDAD SOBRE LO NORMAL en {region_display} ({period_title}):** "
+            f"**{pct_diff:+.1f}%** ({ratio:.1f}x lo habitual). Ventana crítica local: **{top3_names}** (**{top3_share:.0f}%**)."
             if is_es else
-            f"🟠 **ABOVE-NORMAL ACTIVITY in {region_display} ({period_title}):** "
+            f"**ABOVE-NORMAL ACTIVITY in {region_display} ({period_title}):** "
             f"**{pct_diff:+.1f}%** ({ratio:.1f}x normal). Local critical window: **{top3_names}**."
         )
     elif ratio >= 0.75:
         st.success(
-            f"🟢 **NIVEL NORMAL en {region_display} ({period_title}):** "
-            f"Actividad dentro de lo habitual ({pct_diff:+.1f}%). Recuerda cuidarte en **{top3_names}**."
+            f"**NIVEL NORMAL en {region_display} ({period_title}):** "
+            f"Actividad dentro del rango habitual ({pct_diff:+.1f}%). Meses de mayor riesgo en la zona: **{top3_names}**."
             if is_es else
-            f"🟢 **NORMAL LEVEL in {region_display} ({period_title}):** "
+            f"**NORMAL LEVEL in {region_display} ({period_title}):** "
             f"Activity within expected historical range ({pct_diff:+.1f}%)."
         )
     else:
         st.info(
-            f"🔵 **AÑO TRANQUILO / BAJO LO NORMAL en {region_display} ({period_title}):** "
-            f"**{abs(pct_diff):.1f}% menos** fuego que lo habitual. La temporada de mayor cuidado sigue siendo **{top3_names}**."
+            f"**ACTIVIDAD BAJO LO NORMAL en {region_display} ({period_title}):** "
+            f"**{abs(pct_diff):.1f}% menos** actividad que lo habitual. La temporada crítica sigue siendo **{top3_names}**."
             if is_es else
-            f"🔵 **BELOW-NORMAL ACTIVITY in {region_display} ({period_title}):** "
-            f"**{abs(pct_diff):.1f}% lower** than usual."
+            f"**BELOW-NORMAL ACTIVITY in {region_display} ({period_title}):** "
+            f"**{abs(pct_diff):.1f}% lower** than usual. Peak season remains **{top3_names}**."
         )
 else:
     if total_selected > 0:
         anomaly_str = "Inusual" if is_es else "Off-season"
         st.warning(
-            f"🟠 **FUEGO FUERA DE TEMPORADA en {region_display} ({period_title}):** "
-            f"Se detectaron {total_selected:,.0f} {unit_label.lower()} en un mes donde normalmente no hay incendios."
+            f"**FUEGO FUERA DE TEMPORADA en {region_display} ({period_title}):** "
+            f"Se detectaron {total_selected:,.0f} {unit_label.lower()} en un mes sin actividad habitual."
             if is_es else
-            f"🟠 **OFF-SEASON FIRE DETECTED in {region_display} ({period_title}):** "
+            f"**OFF-SEASON FIRE DETECTED in {region_display} ({period_title}):** "
             f"{total_selected:,.0f} {unit_label.lower()} recorded in a month with zero typical activity."
         )
     else:
         anomaly_str = "Normal (0)"
         st.success(
-            f"🟢 **SIN INCENDIOS DETECTADOS en {region_display} ({period_title}):** Comportamiento normal."
+            f"**SIN INCENDIOS DETECTADOS en {region_display} ({period_title}):** Comportamiento normal."
             if is_es else
-            f"🟢 **NO FIRES DETECTED in {region_display} ({period_title}):** Normal behavior."
+            f"**NO FIRES DETECTED in {region_display} ({period_title}):** Normal behavior."
         )
 
-# 8. Tarjetas KPI adaptadas
+# 8. Indicadores Numéricos (KPIs)
 kpi1, kpi2, kpi3 = st.columns(3)
 kpi1.metric(
     f"{'Focos detectados en' if (is_es and audience == 'citizen') else ('Actividad en' if is_es else 'Activity in')} {period_title}",
@@ -369,55 +397,69 @@ kpi3.metric(
 
 st.markdown("---")
 
-# 9. Visualizaciones Principales según el Público
+# 9. Calendario Histórico + Explicación Explícita de Cada Cuadrícula
 calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=value_col).reindex(columns=range(1, 13))
 max_monthly_all_time = max(float(monthly_totals[value_col].max()), 1.0)
 
 if audience == "citizen":
-    st.subheader("🗓️ ¿En qué meses hay más peligro? (Calendario 2000–2026)" if is_es else "🗓️ When Is Fire Danger Highest? (2000–2026 Calendar)")
-    st.caption(
-        "Cada fila es un año y cada columna es un mes. **Azul** = tranquilo | **Amarillo** = emergencia grave."
+    st.subheader("Paso 4 · Calendario Histórico por Mes y Año (2000–2026)" if is_es else "Step 4 · Historical Calendar by Month & Year (2000–2026)")
+    st.markdown(
+        (
+            "**Cómo leer este cuadro:** Cada **fila horizontal** es un año y cada **columna vertical** es un mes. "
+            "Cada **cuadrícula (rectángulo)** representa la cantidad total de focos de calor detectados en esa región durante **ese mes y año exacto**.\n\n"
+            f"**Guía de colores:** {color_guide_text}"
+        )
         if is_es else
-        "Each row is a year and each column is a month. **Blue** = calm | **Yellow** = severe emergency."
+        (
+            "**How to read this grid:** Each **row** is a year and each **column** is a month. "
+            "Each **cell (rectangle)** represents the total fire hotspots detected in this region during **that exact month and year**.\n\n"
+            f"**Color guide:** {color_guide_text}"
+        )
     )
     fig_cal = px.imshow(
         calendar_pivot,
         labels=dict(x="Mes" if is_es else "Month", y="Año" if is_es else "Year", color=unit_label),
         x=month_names,
         y=calendar_pivot.index.astype(str),
-        color_continuous_scale="Cividis",
+        color_continuous_scale=color_scale,
         aspect="auto"
     )
     fig_cal.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig_cal, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader(f"🗺️ Mapa: ¿Dónde ocurrió el fuego en {period_title}?" if is_es else f"🗺️ Map: Where Did Fires Happen in {period_title}?")
-    st.caption(
-        "Elige una localidad de la lista o haz clic en un cuadrante del mapa para acercarte y verlo en Google Maps."
-        if is_es else
-        "Pick a locality from the dropdown or click any zone on the map to zoom in and open Google Maps."
-    )
+    st.plotly_chart(fig_cal, width='stretch')
 
 else:
     col_cal, col_curve = st.columns([1.4, 1])
 
     with col_cal:
-        st.subheader("🗓️ Calendario de Actividad (26 Años)" if is_es else "🗓️ 26-Year Burning Activity Calendar")
+        st.subheader("Calendario de Actividad (26 Años)" if is_es else "26-Year Burning Activity Calendar")
+        st.caption(
+            (
+                f"Cada cuadrícula representa 1 mes de 1 año en {region_display}. {color_guide_text}"
+            )
+            if is_es else
+            (
+                f"Each cell represents 1 month of 1 year in {region_display}. {color_guide_text}"
+            )
+        )
         fig_cal = px.imshow(
             calendar_pivot,
             labels=dict(x="Mes" if is_es else "Month", y="Año" if is_es else "Year", color=unit_label),
             x=month_names,
             y=calendar_pivot.index.astype(str),
-            color_continuous_scale="Cividis",
+            color_continuous_scale=color_scale,
             aspect="auto"
         )
-        fig_cal.update_layout(height=450, margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig_cal, use_container_width=True)
+        fig_cal.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_cal, width='stretch')
 
     with col_curve:
         st.subheader(
-            f"{'📈 Curva Estacional' if is_es else '📈 Seasonal Profile'} ({selected_year} {'vs. Normal' if is_es else 'vs. Baseline'})"
+            f"{'Curva Estacional' if is_es else 'Seasonal Profile'} ({selected_year} {'vs. Normal' if is_es else 'vs. Baseline'})"
+        )
+        st.caption(
+            "La banda sombreada muestra el rango habitual (percentiles 25–75) y la línea sólida muestra el año elegido."
+            if is_es else
+            "Shaded band shows the normal corridor (25th–75th percentiles); solid line shows the selected year."
         )
         stats_monthly = monthly_totals.groupby('month')[value_col].agg(
             median='median',
@@ -446,42 +488,48 @@ else:
             x=month_names,
             y=year_curve[value_col],
             mode='lines+markers',
-            line=dict(color='#FDE725', width=3),
+            line=dict(color=accent_line_color, width=3),
             marker=dict(size=7),
             name=f"{'Año' if is_es else 'Year'} {selected_year}"
         ))
         fig_curve.update_layout(
             height=450,
-            margin=dict(l=10, r=10, t=20, b=10),
+            margin=dict(l=10, r=10, t=10, b=10),
             yaxis=dict(title=unit_label, range=[0, max_monthly_all_time * 1.05]),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        st.plotly_chart(fig_curve, use_container_width=True)
+        st.plotly_chart(fig_curve, width='stretch')
 
     if audience == "scientist":
         st.markdown("---")
         st.subheader(
-            "📉 Continuidad Instrumental 2000–2026 (MODIS Calibrado vs. VIIRS Directo)"
+            "Continuidad Instrumental 2000–2026 (MODIS Calibrado vs. VIIRS Directo)"
             if is_es else
-            "📉 2000–2026 Instrumental Continuity (MODIS Calibrated vs. VIIRS Direct)"
+            "2000–2026 Instrumental Continuity (MODIS Calibrated vs. VIIRS Direct)"
         )
         annual_df = annual_totals.reset_index()
         modis_lbl = "MODIS (Calibrado)" if is_es else "MODIS (Calibrated)"
         viirs_lbl = "VIIRS (Directo)" if is_es else "VIIRS (Direct)"
         annual_df['Sensor'] = np.where(annual_df['year'] < 2012, modis_lbl, viirs_lbl)
 
+        bar_colors = (
+            {modis_lbl: '#FE9929', viirs_lbl: '#B10026'}
+            if palette_mode == "standard" else
+            {modis_lbl: '#3B528B', viirs_lbl: '#FDE725'}
+        )
+
         fig_trend = px.bar(
             annual_df,
             x='year',
             y=value_col,
             color='Sensor',
-            color_discrete_map={modis_lbl: '#3B528B', viirs_lbl: '#FDE725'},
+            color_discrete_map=bar_colors,
             labels={'year': "Año" if is_es else "Year", value_col: unit_label}
         )
         fig_trend.add_hline(
             y=annual_median_baseline,
             line_dash="dash",
-            line_color="white",
+            line_color="gray",
             annotation_text="Mediana 2000–2025" if is_es else "2000–2025 Median",
             annotation_position="top left"
         )
@@ -497,12 +545,11 @@ else:
             margin=dict(l=10, r=10, t=30, b=10),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        st.plotly_chart(fig_trend, use_container_width=True)
+        st.plotly_chart(fig_trend, width='stretch')
 
-    st.markdown("---")
-    st.subheader(f"🗺️ Mapa Espacial de Intensidad — {period_title}" if is_es else f"🗺️ Spatial Fire Intensity Map — {period_title}")
+st.markdown("---")
 
-# 10. Mapa Espacial Interactivo con Inspector de Localidades y Google Maps
+# 10. Mapa Espacial con Explicación Explícita de Cada Cuadrante
 CHILE_LOCALITIES = [
     ("Arica", -18.48, -70.31, "urban"),
     ("Iquique", -20.21, -70.15, "urban"),
@@ -579,6 +626,30 @@ def describe_location(lat, lon, is_es_flag=True):
         )
     return loc_str, best_type
 
+unique_lats = np.sort(df['lat_bin'].unique())
+diffs = np.diff(unique_lats)
+diffs = diffs[diffs > 1e-5]
+grid_res = float(np.min(diffs)) if len(diffs) > 0 else 0.25
+cell_km = grid_res * 111.0
+
+st.subheader(
+    f"Paso 5 · Distribución Geográfica en el Territorio — {period_title}"
+    if is_es else
+    f"Step 5 · Geographic Distribution Across Terrain — {period_title}"
+)
+st.markdown(
+    (
+        f"**Qué representa cada cuadrícula del mapa:** El territorio está dividido en cuadrantes de `{grid_res}° × {grid_res}°` "
+        f"(aprox. **{cell_km:.1f} km** por lado). Cada cuadrado muestra la concentración de calor detectada en ese sector, "
+        f"comparada contra el máximo histórico de 26 años de **{region_display}**."
+    )
+    if is_es else
+    (
+        f"**What each map cell represents:** The terrain is divided into `{grid_res}° × {grid_res}°` quadrants "
+        f"(approx. **{cell_km:.1f} km** wide), showing thermal activity in that sector benchmarked against the 26-year historical peak of **{region_display}**."
+    )
+)
+
 col_map, col_side = st.columns([2.2, 1])
 
 with col_map:
@@ -590,12 +661,12 @@ with col_map:
         )
     else:
         map_style_choice = st.radio(
-            "🗺️ Vista del mapa:" if is_es else "🗺️ Map view:",
+            "Fondo del mapa:" if is_es else "Map background:",
             ["osm", "dark"],
             format_func=lambda k: (
-                ("📍 Con Ciudades, Pueblos y Caminos" if is_es else "📍 Cities, Towns & Roads")
+                ("Con ciudades, pueblos y caminos" if is_es else "Cities, towns & roads")
                 if k == "osm" else
-                ("🌑 Fondo Oscuro (Alto Contraste)" if is_es else "🌑 Dark Background")
+                ("Fondo oscuro (alto contraste)" if is_es else "Dark background (high contrast)")
             ),
             horizontal=True
         )
@@ -619,23 +690,18 @@ with col_map:
         top_n = min(len(map_agg), 30)
         inspect_options = [-1] + list(range(top_n))
         selected_idx = st.selectbox(
-            "🔍 Elige un sector afectado para acercar el mapa y abrirlo en Google Maps:"
+            "Inspeccionar sector específico (o hacer clic en el mapa):"
             if is_es else
-            "🔍 Pick an affected sector to zoom in and open in Google Maps:",
+            "Inspect specific sector (or click directly on the map):",
             options=inspect_options,
             format_func=lambda idx: (
-                ("— Ver toda la región completa —" if is_es else "— Full region overview —")
+                ("— Vista general de toda la región —" if is_es else "— Full region overview —")
                 if idx == -1 else
                 f"#{idx + 1} · {map_agg.loc[idx, 'localidad']} ({map_agg.loc[idx, value_col]:,.0f} {unit_label})"
             )
         )
 
-        unique_lats = np.sort(df['lat_bin'].unique())
-        diffs = np.diff(unique_lats)
-        diffs = diffs[diffs > 1e-5]
-        grid_res = float(np.min(diffs)) if len(diffs) > 0 else 0.25
         half = grid_res / 2.0
-
         features = []
         for _, row in map_agg.iterrows():
             lat_c, lon_c = float(row["lat_bin"]), float(row["lon_bin"])
@@ -663,9 +729,9 @@ with col_map:
         zoom_to_selected = False
         if selected_idx != -1:
             zoom_to_selected = st.checkbox(
-                f"🔎 Acercar mapa a {map_agg.loc[selected_idx, 'localidad']}"
+                f"Acercar mapa a {map_agg.loc[selected_idx, 'localidad']}"
                 if is_es else
-                f"🔎 Zoom map into {map_agg.loc[selected_idx, 'localidad']}",
+                f"Zoom map into {map_agg.loc[selected_idx, 'localidad']}",
                 value=True
             )
 
@@ -706,7 +772,7 @@ with col_map:
             locations="cell_id",
             featureidkey="id",
             color=value_col,
-            color_continuous_scale="Cividis",
+            color_continuous_scale=color_scale,
             range_color=[0, hist_cell_max],
             opacity=0.65,
             zoom=zoom_lvl,
@@ -721,18 +787,18 @@ with col_map:
             },
             **style_kwarg
         )
-        fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(255,255,255,0.35)")
+        fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(120,120,120,0.45)")
         fig_map.update_layout(height=460, margin=dict(l=0, r=0, t=10, b=0))
 
         try:
-            chart_event = st.plotly_chart(fig_map, use_container_width=True, on_select="rerun", selection_mode="points", key="fire_map_chart")
+            chart_event = st.plotly_chart(fig_map, width='stretch', on_select="rerun", selection_mode="points", key="fire_map_chart")
             if chart_event and getattr(chart_event, "selection", None) and chart_event.selection.get("points"):
                 pt = chart_event.selection["points"][0]
                 clicked_idx = pt.get("point_index", pt.get("pointIndex", None))
                 if clicked_idx is not None and 0 <= int(clicked_idx) < len(map_agg):
                     selected_idx = int(clicked_idx)
         except TypeError:
-            st.plotly_chart(fig_map, use_container_width=True)
+            st.plotly_chart(fig_map, width='stretch')
 
         if selected_idx != -1:
             sel_row = map_agg.loc[selected_idx]
@@ -742,67 +808,67 @@ with col_map:
 
             if sel_row["zone_type"] == "industrial_desert":
                 origin_note = (
-                    "🏭 **¿Por qué hay calor aquí?** En el norte minero (Calama / Antofagasta), el satélite suele detectar **fundiciones de cobre o plantas solares**, no bosques quemándose."
+                    "**Origen probable:** En el norte minero (Calama / Antofagasta), los focos fijos corresponden generalmente a **fundiciones de cobre o plantas solares**, no a incendios forestales."
                     if is_es else
-                    "🏭 **Why is heat detected here?** In northern mining areas, satellites often detect **copper smelters or solar plants** rather than forest wildfires."
+                    "**Probable source:** In northern mining areas, persistent detections generally correspond to **copper smelters or solar thermal plants**, not forest wildfires."
                 )
             else:
                 origin_note = (
-                    "🌲 **¿Por qué hay calor aquí?** En esta zona centro-sur, las alertas corresponden principalmente a **incendios forestales, de pastizales o quemas agrícolas**."
+                    "**Origen probable:** En esta zona centro-sur, las detecciones reflejan principalmente **incendios forestales, de pastizales o quemas agrícolas**."
                     if is_es else
-                    "🌲 **Why is heat detected here?** In central-southern Chile, alerts mainly reflect **forest/brush wildfires or agricultural burns**."
+                    "**Probable source:** In central-southern Chile, detections primarily reflect **forest/brush wildfires or agricultural burns**."
                 )
 
             st.info(
-                f"📍 **Zona seleccionada:** **{sel_row['localidad']}** (`{s_lat:.3f}°, {s_lon:.3f}°`) — "
+                f"**Sector inspeccionado:** **{sel_row['localidad']}** (`{s_lat:.3f}°, {s_lon:.3f}°`) — "
                 f"**{sel_row['harmonized_hotspots']:,.0f}** {'focos calibrados' if is_es else 'calibrated hotspots'}\n\n"
                 f"{origin_note}\n\n"
-                f"🔗 [**Ver terreno real en Google Maps**]({gmaps_url})  |  "
-                f"[**Ver alerta en vivo en NASA FIRMS**]({firms_url})"
+                f"[Abrir coordenadas en Google Maps]({gmaps_url})  |  "
+                f"[Ver en plataforma NASA FIRMS]({firms_url})"
             )
 
 with col_side:
     if audience == "citizen":
-        st.subheader("🏛️ Consulta a tu Municipio y Ayuda" if is_es else "🏛️ Contact Municipality & Help")
+        st.subheader("Consulta a tu Municipio y Ayuda" if is_es else "Contact Municipality & Help")
         if is_es:
-            st.error("🚨 **¿Ves humo o fuego ahora mismo?**\nLlama gratis al **130 (CONAF)**, **132 (Bomberos)** o **133 (Carabineros)**.")
+            st.error("**Emergencias activas:** Si ves humo o fuego ahora mismo, llama gratis al **130 (CONAF)** o **132 (Bomberos)**.")
             st.markdown(
-                f"**📋 Solicita prevención en tu comuna ({region_display}):**\n"
-                f"Si vives cerca de pastizales o bosques, copia este mensaje y envíalo a la oficina de emergencias de tu municipalidad antes de **{top3_names}**:"
+                f"**Solicitud preventiva para tu comuna ({region_display}):**\n"
+                f"Copia este texto y envíalo a la oficina de emergencias de tu municipalidad antes de **{top3_names}**:"
             )
             sample_sector = map_agg.loc[0, "localidad"] if not df_map_source.empty else region_display
             msg_muni = (
-                f"Estimado equipo de Emergencias y Gestión de Riesgos de la Municipalidad:\n"
-                f"Según los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} - {sample_sector}) "
+                f"Estimado equipo de Emergencias de la Municipalidad:\n"
+                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} - {sample_sector}) "
                 f"concentra el {top3_share:.0f}% de los incendios entre {top3_names}. "
-                f"Solicitamos informar el calendario preventivo de limpieza de maleza y mantención de cortafuegos para nuestro sector."
+                f"Solicitamos informar el calendario de limpieza de maleza y mantención de cortafuegos preventivos para nuestro sector."
             )
-            st.text_area("Mensaje listo para copiar y enviar a tu municipio:", value=msg_muni, height=155)
+            st.text_area("Texto listo para copiar:", value=msg_muni, height=155)
         else:
-            st.error("🚨 **See active smoke or fire?**\nCall **130 (CONAF)** or **132 (Firefighters)** immediately.")
+            st.error("**Active emergencies:** If you see smoke or fire right now, call **130 (CONAF)** or **132 (Firefighters)**.")
             st.info(f"In **{region_display}**, **{top3_names}** concentrate **{top3_share:.0f}%** of annual fire activity. Ask your local municipality about preventive firebreaks ahead of this window.")
 
     elif audience == "municipal":
-        st.subheader("📥 Reporte Territorial (GIS / Excel)" if is_es else "📥 Territorial Data (GIS / Excel)")
+        st.subheader("Exportar Reporte Territorial" if is_es else "Export Territorial Report")
         st.write(
-            f"Descarga la base histórica calibrada de **{region_display}** ({len(df_filtered):,} registros) para cruzarla con mapas comunales en QGIS o Excel."
+            f"Descarga la serie histórica calibrada de **{region_display}** ({len(df_filtered):,} registros) para usar en QGIS o Excel."
             if is_es else
-            f"Download the calibrated historical dataset for **{region_display}** ({len(df_filtered):,} records) for municipal mapping in QGIS or Excel."
+            f"Download the calibrated historical dataset for **{region_display}** ({len(df_filtered):,} records) for QGIS or Excel."
         )
         csv_export = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="⬇️ Descargar Datos Regionales (CSV)" if is_es else "⬇️ Download Regional Data (CSV)",
+            label="Descargar Datos Regionales (CSV)" if is_es else "Download Regional Data (CSV)",
             data=csv_export,
             file_name=f"incendios_calibrados_{preset.replace(' ', '_').lower()}.csv",
             mime="text/csv",
         )
         st.info(
-            "🏛️ **Uso Municipal:** Las coordenadas (`lat_bin`, `lon_bin`) permiten priorizar cortafuegos y patrullajes preventivos."
+            "Las coordenadas (`lat_bin`, `lon_bin`) permiten identificar qué sectores rurales concentran mayor recurrencia histórica de fuego."
             if is_es else
-            "🏛️ **Municipal Use:** Grid coordinates (`lat_bin`, `lon_bin`) help prioritize firebreaks and preventive patrols."
+            "Grid coordinates (`lat_bin`, `lon_bin`) pinpoint which rural sectors suffer recurring fire activity."
         )
     else:
-        st.subheader("📥 Exportar Dataset Calibrado" if is_es else "📥 Export Calibrated Dataset")
+        st.subheader("Exportar Dataset Calibrado" if is_es else "Export Calibrated Dataset")
         st.write(
             f"Serie armonizada MODIS + VIIRS para **{region_display}** ({len(df_filtered):,} registros celda-mes)."
             if is_es else
@@ -810,102 +876,116 @@ with col_side:
         )
         csv_export = df_filtered.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="⬇️ Descargar CSV Armonizado" if is_es else "⬇️ Download Harmonized CSV",
+            label="Descargar CSV Armonizado" if is_es else "Download Harmonized CSV",
             data=csv_export,
             file_name=f"harmonized_fires_{preset.replace(' ', '_').lower()}.csv",
             mime="text/csv",
         )
         st.info(
-            "🔬 **Validación:** Calibración MODIS→VIIRS mediante Gradient Boosting (`scan × track` + factor de Duan). "
+            "Validación: Calibración MODIS→VIIRS mediante Gradient Boosting (`scan × track` + factor de Duan). "
             "`R² lineal = 0.887` (`0.689` log); hindcast temporal ciego 2012–2015 con `R² = 0.784` y sesgo `+4.88%`."
             if is_es else
-            "🔬 **Validation:** MODIS→VIIRS Gradient Boosting (`scan × track` + Duan's smearing). "
+            "Validation: MODIS→VIIRS Gradient Boosting (`scan × track` + Duan's smearing). "
             "`Linear R² = 0.887` (`0.689` log); blind 2012–2015 temporal hindcast `R² = 0.784` (`+4.88%` bias)."
         )
 
 st.markdown("---")
 
-# 11. Sección Educativa e Interactiva: Satélites, Qué se hizo y Preguntas Clave
-st.subheader("ℹ️ Ayuda, Satélites y ¿Qué se hizo en este proyecto?" if is_es else "ℹ️ Help, Satellites & How This Was Built")
+# 11. Guía Metodológica y Preguntas Clave (Sin exceso de íconos)
+st.subheader("Guía de Uso, Satélites y Metodología" if is_es else "User Guide, Satellites & Methodology")
 
-tab_sat, tab_how, tab_faq = st.tabs(
+tab_guide, tab_sat, tab_how, tab_faq = st.tabs(
     [
-        "🛰️ ¿Qué satélites usamos?",
-        "🛠️ ¿Qué se hizo en este proyecto?",
-        "❓ Preguntas Clave (Ayuda)"
+        "Cómo usar paso a paso",
+        "Satélites utilizados",
+        "Qué se hizo en el proyecto",
+        "Preguntas frecuentes"
     ]
     if is_es else
     [
-        "🛰️ Which Satellites Are Used?",
-        "🛠️ How Was This Built?",
-        "❓ Key Questions (FAQ)"
+        "Step-by-step guide",
+        "Satellites used",
+        "How it was built",
+        "FAQ"
     ]
 )
+
+with tab_guide:
+    if is_es:
+        st.markdown(
+            "1. **Paso 1 (Territorio):** Elige tu región (o todo Chile) en el selector superior.\n"
+            "2. **Paso 2 (Nivel de detalle):** Selecciona *Ciudadanía* para lenguaje cotidiano, *Municipios* para gestión preventiva o *Investigadores* para métricas técnicas.\n"
+            "3. **Paso 3 (Período):** Usa los botones rápidos o desliza la barra para elegir un año (y opcionalmente un mes específico).\n"
+            "4. **Paso 4 (Calendario):** Revisa la cuadrícula de 26 años. Cada rectángulo es un mes; las columnas más intensas muestran la temporada crítica anual de tu región.\n"
+            "5. **Paso 5 (Mapa):** Selecciona un sector en el listado o haz clic sobre un cuadrante del mapa para acercarte y abrir el lugar exacto en Google Maps."
+        )
+    else:
+        st.markdown(
+            "1. **Step 1 (Territory):** Choose your region (or All Chile) in the top dropdown.\n"
+            "2. **Step 2 (Detail level):** Pick *Citizens*, *Municipalities*, or *Researchers*.\n"
+            "3. **Step 3 (Time period):** Use quick shortcuts or the year/month controls.\n"
+            "4. **Step 4 (Calendar):** Read the 26-year monthly grid; each cell shows total detections for that month and year.\n"
+            "5. **Step 5 (Map):** Pick any sector or click a map quadrant to zoom in and open Google Maps."
+        )
 
 with tab_sat:
     if is_es:
         c_s1, c_s2 = st.columns(2)
         with c_s1:
             st.markdown(
-                "### 📡 1. Satélites MODIS (2000–2011)\n"
-                "* **Naves de la NASA:** **Terra** y **Aqua**.\n"
-                "* **Cómo miran:** Tienen una cámara térmica de **1 kilómetro por píxel**.\n"
-                "* **Su valor:** Guardan la memoria histórica más antigua (desde el año 2000), pero al tener píxeles grandes no alcanzan a ver focos pequeños."
+                "**1. Satélites MODIS (2000–2011)**\n"
+                "* **Instrumentos NASA:** Sensores a bordo de los satélites **Terra** y **Aqua**.\n"
+                "* **Resolución:** Píxeles de **1 kilómetro**.\n"
+                "* **Aporte:** Entregan la memoria histórica más extensa desde el año 2000, aunque por el tamaño de su píxel no detectan focos pequeños."
             )
         with c_s2:
             st.markdown(
-                "### 🛰️ 2. Satélites VIIRS (2012–2026)\n"
-                "* **Naves NASA / NOAA:** **Suomi-NPP**, **NOAA-20** y **NOAA-21**.\n"
-                "* **Cómo miran:** Tienen una cámara de alta definición de **375 metros por píxel** (casi 7 veces más detalle).\n"
-                "* **El problema:** Como ven mucho más detalle, si comparas 2005 con 2023 sin corregirlos, parece que los incendios crecieron artificialmente."
+                "**2. Satélites VIIRS (2012–2026)**\n"
+                "* **Instrumentos NASA / NOAA:** Sensores a bordo de **Suomi-NPP**, **NOAA-20** y **NOAA-21**.\n"
+                "* **Resolución:** Píxeles de **375 metros** (casi 7 veces mayor detalle espacial).\n"
+                "* **Desafío:** Al tener mayor sensibilidad, comparar datos crudos de 2005 contra 2023 genera un salto artificial que este proyecto corrige."
             )
     else:
         st.markdown(
             "- **MODIS (Terra & Aqua, 2000–2011):** 1 km thermal resolution; provides the deep 26-year historical baseline.\n"
-            "- **VIIRS (Suomi-NPP, NOAA-20/21, 2012–2026):** 375 m high-resolution thermal sensors; detects smaller and lower-intensity fires.\n"
-            "- **Why harmonize?** Combining raw counts creates a false jump in 2012; our calibration translates MODIS into VIIRS-equivalent units."
+            "- **VIIRS (Suomi-NPP, NOAA-20/21, 2012–2026):** 375 m high-resolution thermal sensors; detects smaller fires.\n"
+            "- **Why harmonize?** Combining raw counts creates an artificial jump in 2012; our calibration translates MODIS into VIIRS-equivalent units."
         )
 
 with tab_how:
     if is_es:
         st.markdown(
-            "Para que cualquier persona pueda comparar el pasado con el presente sin engaños, construimos un sistema en **4 pasos**:\n"
-            "1. **Limpieza de duplicados orbitales:** Cuando dos satélites pasan por el mismo lugar con minutos de diferencia, eliminamos las detecciones repetidas para no contar el mismo incendio dos veces.\n"
-            "2. **Corrección del ángulo de cámara (`scan × track`):** Cuando el satélite mira de lado hacia el horizonte, el píxel se estira hasta 9.6 veces; calculamos el área real observada.\n"
-            "3. **Inteligencia Artificial traductora:** Aprovechamos los **14 años en que ambos satélites volaron juntos (2012–2026)** para entrenar un modelo (*Gradient Boosting*) que aprendió a traducir los datos antiguos al estándar moderno (`R² = 0.887`, error acumulado menor al `5%`).\n"
-            "4. **Calendario ciudadano:** Transformamos millones de datos científicos de la NASA en este semáforo y mapa interactivo para comunidades y municipios."
+            "El procesamiento de datos se realizó en **4 etapas**:\n"
+            "1. **Desduplicación orbital:** Se filtraron las pasadas redundantes cuando dos satélites observan el mismo incendio con minutos de diferencia.\n"
+            "2. **Geometría óptica del píxel (`scan × track`):** Se calculó el área real observada en tierra cuando el sensor mira hacia los bordes del barrido (donde el píxel se estira hasta 9.6 veces).\n"
+            "3. **Calibración mediante aprendizaje automático:** Usando los **14 años de operación simultánea (2012–2026)**, se entrenó un modelo *Gradient Boosting* con corrección de Duan para traducir MODIS a escala VIIRS (`R² lineal = 0.887`, sesgo acumulado `< 5%` en validación ciega).\n"
+            "4. **Visualización accesible:** Se integró el dataset calibrado en este calendario interactivo con escalas de color estándar y adaptadas para daltonismo."
         )
     else:
         st.markdown(
             "1. **Orbital de-duplication:** Removes redundant detections from overlapping satellite passes.\n"
             "2. **Optical pixel geometry (`scan × track`):** Accounts for off-nadir pixel stretching up to 9.6 km².\n"
-            "3. **Cross-sensor Machine Learning:** Trains Gradient Boosting with Duan's smearing on the 2012–2026 overlap (`R² = 0.887`, `< 5%` blind hindcast bias).\n"
-            "4. **Multi-profile calendar:** Delivers tailored views for citizens, municipalities, and researchers."
+            "3. **Cross-sensor Machine Learning:** Trains Gradient Boosting with Duan's smearing on the 2012–2026 overlap (`Linear R² = 0.887`, `< 5%` blind hindcast bias).\n"
+            "4. **Accessible interface:** Delivers tailored views with standard and colorblind-safe palettes."
         )
 
 with tab_faq:
     if is_es:
-        with st.expander("❓ ¿Por qué aparecen puntos amarillos en el desierto (ej. Calama o Antofagasta)?"):
+        with st.expander("¿Por qué aparecen focos en el desierto del norte (ej. Calama o Antofagasta)?"):
             st.write(
-                "Los satélites de la NASA detectan **calor intenso en la superficie**, sin distinguir si viene de un árbol o de una máquina. "
-                "En el norte de Chile, esas señales fijas corresponden a **fundiciones de cobre (como Chuquicamata), faenas mineras o plantas termosolares**, no a incendios forestales."
+                "Los satélites NASA FIRMS miden anomalías térmicas en superficie sin distinguir su origen. "
+                "En el norte de Chile, esas detecciones persistentes corresponden a fundiciones de cobre (como Chuquicamata), faenas mineras o plantas termosolares, no a incendios forestales."
             )
-        with st.expander("❓ ¿Cómo se leen los colores del calendario y del mapa?"):
+        with st.expander("¿Qué significa 'Lo normal (Mediana de 26 años)'?"):
             st.write(
-                "Usamos una paleta llamada **Cividis** (apta para personas con daltonismo): el **azul oscuro** indica calma o actividad baja, "
-                "el **gris/verdoso** indica actividad moderada y el **amarillo brillante** señala concentración crítica o emergencia grave."
+                "Es el valor central típico de un año o mes entre 2000 y 2025. Usar la mediana evita que años extremos (como 2017 o 2023) distorsionen la referencia de un año habitual."
             )
-        with st.expander("❓ ¿Qué significa 'Lo normal (Mediana de 26 años)'?"):
+        with st.expander("¿Esta plataforma reemplaza las alertas de emergencia en tiempo real?"):
             st.write(
-                "Es el valor típico de un año o mes en tu región entre 2000 y 2025. Usar la mediana evita que megaincendios extremos (como 2017 o 2023) distorsionen lo que consideramos un año normal."
-            )
-        with st.expander("❓ ¿Esta página sirve para avisar de un incendio que está empezando ahora mismo?"):
-            st.write(
-                "Esta herramienta está diseñada para **prevención, educación y planificación** usando registros históricos y mensuales. "
-                "Si ves humo o fuego activo hoy, llama de inmediato al **130 (CONAF)** o **132 (Bomberos)**."
+                "No. Esta herramienta está diseñada para prevención, análisis histórico y planificación territorial. Ante humo o fuego activo hoy, llama al 130 (CONAF) o 132 (Bomberos)."
             )
     else:
-        with st.expander("❓ Why do hotspots appear in the northern desert (e.g., Calama)?"):
-            st.write("NASA FIRMS detects thermal anomalies including copper smelters, mining operations, and solar thermal plants.")
-        with st.expander("❓ How do I read the blue-to-yellow colors?"):
-            st.write("Dark blue means low/calm activity, grey-green means moderate, and bright yellow marks severe hotspot concentration (colorblind-safe Cividis scale).")
+        with st.expander("Why do hotspots appear in the northern desert (e.g., Calama)?"):
+            st.write("NASA FIRMS detects surface thermal anomalies including copper smelters, mining operations, and solar plants.")
+        with st.expander("What does 'Typical Year (26-year median)' mean?"):
+            st.write("It is the middle value across 2000–2025, preventing extreme megafire years from skewing the baseline.")
