@@ -56,7 +56,8 @@ st.sidebar.caption(
     "- Grid: `0.25° × 0.25°`\n"
     "- Swath Geometry: `scan × track`\n"
     "- Orbital De-duplication: Active\n"
-    "- Fixed 26-year `Cividis` scale"
+    "- Baseline Median: `2000–2025` complete years\n"
+    "- Fixed `Cividis` colorblind-safe scale"
 )
 
 # Filtrar por coordenadas
@@ -88,19 +89,24 @@ with col_ctrl1:
 with col_ctrl2:
     selected_month_label = st.selectbox("Filter Map & KPIs by Month:", month_options, index=0)
 
-# Cálculo de series mensuales completas (26 años), enmascarando meses futuros (Dic 2026)
+# Cálculo de series mensuales completas (2000–2026), enmascarando diciembre 2026 (futuro)
 all_years = range(int(min(years_available)), int(max(years_available)) + 1)
 full_grid = pd.MultiIndex.from_product([all_years, range(1, 13)], names=['year', 'month']).to_frame().reset_index(drop=True)
 monthly_raw = df_filtered.groupby(['year', 'month'])[value_col].sum().reset_index()
 monthly_totals = pd.merge(full_grid, monthly_raw, on=['year', 'month'], how='left').fillna(0)
 monthly_totals.loc[(monthly_totals['year'] == 2026) & (monthly_totals['month'] > 11), value_col] = np.nan
 
+# Totales anuales y mediana de referencia usando solo años completos (2000–2025)
+annual_totals = monthly_totals.groupby('year')[value_col].sum()
+complete_years = annual_totals[annual_totals.index < 2026]
+annual_median_baseline = complete_years.median() if not complete_years.empty else annual_totals.median()
+
 # KPIs dinámicos y referencia máxima histórica fija
 if selected_month_label == "All Year (Annual)":
-    annual_totals = monthly_totals.groupby('year')[value_col].sum()
     total_selected = annual_totals.loc[selected_year]
-    median_baseline = annual_totals.median()
-    period_title = f"{selected_year} (Full Year)"
+    median_baseline = annual_median_baseline
+    period_title = f"{selected_year} (YTD Nov)" if selected_year == 2026 else f"{selected_year} (Full Year)"
+    median_label = "2000–2025 Median (Annual)"
     df_map_source = df_filtered[df_filtered['year'] == selected_year]
     ref_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
 else:
@@ -109,6 +115,7 @@ else:
     total_selected = month_series.loc[selected_year] if selected_year in month_series.index else 0.0
     median_baseline = month_series.median()
     period_title = f"{selected_month_label} {selected_year}"
+    median_label = f"Historical Median ({selected_month_label})"
     df_map_source = df_filtered[(df_filtered['year'] == selected_year) & (df_filtered['month'] == month_idx)]
     ref_cell_max = float(df_filtered[value_col].max())
 
@@ -123,8 +130,11 @@ else:
 
 kpi1, kpi2, kpi3 = st.columns(3)
 kpi1.metric(f"Activity in {period_title}", f"{total_selected:,.0f} {unit_label}")
-kpi2.metric(f"26-Year Median ({selected_month_label.split()[0]})", f"{median_baseline:,.0f} {unit_label}")
+kpi2.metric(median_label, f"{median_baseline:,.0f} {unit_label}")
 kpi3.metric("Anomaly vs. Median", anomaly_str)
+
+if selected_year == 2026 and selected_month_label == "All Year (Annual)":
+    st.caption("ℹ️ *Note: 2026 reflects Year-to-Date observations through November and is excluded from the 2000–2025 annual median baseline.*")
 
 st.markdown("---")
 
@@ -191,7 +201,43 @@ with col_curve:
 
 st.markdown("---")
 
-# 6. Mapa Espacial Normalizado con Zoom Dinámico y Visibilidad Mínima
+# 6. Prueba Visual de Continuidad Instrumental (2000–2026)
+st.subheader("📉 26-Year Continuity Check (MODIS Calibrated vs. VIIRS Direct)")
+annual_df = annual_totals.reset_index()
+annual_df['Sensor Regime'] = np.where(annual_df['year'] < 2012, 'MODIS (Calibrated)', 'VIIRS (Direct)')
+
+fig_trend = px.bar(
+    annual_df,
+    x='year',
+    y=value_col,
+    color='Sensor Regime',
+    color_discrete_map={'MODIS (Calibrated)': '#3B528B', 'VIIRS (Direct)': '#FDE725'},
+    labels={'year': 'Year', value_col: unit_label}
+)
+fig_trend.add_hline(
+    y=annual_median_baseline,
+    line_dash="dash",
+    line_color="white",
+    annotation_text="2000–2025 Median",
+    annotation_position="top left"
+)
+fig_trend.add_vline(
+    x=2011.5,
+    line_dash="dot",
+    line_color="#FF6B6B",
+    annotation_text="2012 VIIRS Transition",
+    annotation_position="top right"
+)
+fig_trend.update_layout(
+    height=320,
+    margin=dict(l=10, r=10, t=30, b=10),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+)
+st.plotly_chart(fig_trend, width='stretch')
+
+st.markdown("---")
+
+# 7. Mapa Espacial Normalizado con Zoom Dinámico y Visibilidad Mínima
 col_map, col_dl = st.columns([2.2, 1])
 
 with col_map:
@@ -268,5 +314,6 @@ with col_dl:
     st.info(
         "💡 **Methodology:** Pre-2012 MODIS records are cross-calibrated to VIIRS 375m scale "
         "using Gradient Boosting with optical pixel geometry (`scan × track`) and Duan's smearing "
-        "correction (`Out-of-sample R² = 0.887` across 8,497 overlapping 0.25° cells)."
+        "correction (`Out-of-sample R² = 0.887` across 8,497 overlapping 0.25° cells; blind temporal "
+        "hindcast bias `+4.88%`)."
     )
