@@ -29,14 +29,14 @@ T = {
     "quick_intro_body": """Esta herramienta traduce **26 años de observaciones satelitales de la NASA (2000–2026)** en un semáforo claro para que cualquier persona entienda el riesgo de incendios en su territorio:
 - **¿Qué mide?** **Focos de calor** (puntos donde el satélite detecta fuego activo) y **FRP** (la fuerza o potencia térmica del incendio medida en megawatts).
 - **¿Por qué dice 'Armonizado'?** En 2012 la NASA lanzó satélites con cámaras mucho más nítidas. Si se mezclan los datos sin corregir, parece que los incendios se multiplicaron de golpe; aquí igualamos ambos sensores para mostrar la realidad.
-- **¿Cómo usarlo?** Elige una zona en el menú izquierdo, mueve el año arriba y revisa el **Semáforo de Alerta** y los **cuadros amarillos del calendario** (los meses más críticos). Para ver ejemplos detallados, abre la pestaña **📖 Guía Ciudadana** arriba.""" if is_es else """This tool translates **26 years of NASA satellite observations (2000–2026)** into a clear traffic-light dashboard so anyone can understand local wildfire danger:
+- **¿Cómo usarlo?** Elige **Todo Chile**, cualquiera de las **16 regiones** o **Coordenadas Personalizadas** en el menú izquierdo, mueve el año arriba y revisa el **Semáforo de Alerta** y los **cuadros amarillos del calendario**. Para ver ejemplos detallados, abre la pestaña **📖 Guía Ciudadana** arriba.""" if is_es else """This tool translates **26 years of NASA satellite observations (2000–2026)** into a clear traffic-light dashboard so anyone can understand local wildfire danger:
 - **What does it measure?** **Hotspots** (locations where satellites detect active fire) and **FRP** (fire heat intensity measured in megawatts).
 - **Why 'Harmonized'?** In 2012 NASA launched satellites with sharper cameras. Merging raw data without calibration creates a fake jump; we aligned both sensors to reveal true fire trends.
-- **How to use it?** Pick a region on the left menu, slide the year above, and check the **Alert Banner** and **bright yellow calendar cells** (peak danger months). Open the **📖 Citizen Guide** tab above for a full plain-language walkthrough.""",
-    "aoi_header": "📍 Área de Interés (AOI)" if is_es else "📍 Area of Interest (AOI)",
-    "preset_label": "Zonas Rápidas (Chile):" if is_es else "Quick Presets (Chile):",
-    "all_chile": "Todo Chile" if is_es else "All Chile",
-    "custom_coords": "Coordenadas Personalizadas" if is_es else "Custom Coordinates",
+- **How to use it?** Pick **All Chile**, any of the **16 administrative regions**, or **Custom Coordinates** on the left menu, slide the year above, and check the **Alert Banner** and **bright yellow calendar cells**. Open the **📖 Citizen Guide** tab above for a full plain-language walkthrough.""",
+    "aoi_header": "📍 Territorio / Área de Interés" if is_es else "📍 Territory / Area of Interest",
+    "preset_label": "Selecciona País o Región (16 Regiones):" if is_es else "Select Country or Region (16 Regions):",
+    "all_chile": "🇨🇱 Todo Chile (País Completo)" if is_es else "🇨🇱 All Chile (Full Country)",
+    "custom_coords": "🧭 Coordenadas Personalizadas" if is_es else "🧭 Custom Coordinates",
     "min_lat": "Latitud Mínima" if is_es else "Min Latitude",
     "max_lat": "Latitud Máxima" if is_es else "Max Latitude",
     "min_lon": "Longitud Mínima" if is_es else "Min Longitude",
@@ -47,20 +47,22 @@ T = {
     "opt_frp": "Potencia Radiativa del Fuego (FRP - MW)" if is_es else "Fire Radiative Power (FRP - MW)",
     "unit_hotspots": "Focos" if is_es else "Hotspots",
     "sidebar_summary": """**Resumen de Calibración:**
+- Cobertura: `Todo Chile (16 regiones)`
 - Malla espacial: `0.25° × 0.25°`
 - Geometría de barrido: `scan × track`
 - Desduplicación orbital: Activa
 - Mediana base: `2000–2025` completos
 - Paleta `Cividis` apta para daltonismo""" if is_es else """**Calibration Summary:**
+- Coverage: `All Chile (16 regions)`
 - Grid: `0.25° × 0.25°`
 - Swath Geometry: `scan × track`
 - Orbital De-duplication: Active
 - Baseline Median: `2000–2025` complete years
 - Fixed `Cividis` colorblind-safe scale""",
     "no_data_coords": (
-        "⚠️ No se detectaron focos de calor en las coordenadas seleccionadas. Intenta ampliar el área."
+        "⚠️ No se detectaron focos de calor en la zona seleccionada durante los 26 años analizados."
         if is_es else
-        "⚠️ No fire hotspots detected in the selected coordinates. Try expanding the bounding box."
+        "⚠️ No fire hotspots detected in the selected area across the 26-year record."
     ),
     "detector_header": "📊 Detector de Anomalías Históricas" if is_es else "📊 Historical Anomaly Detector",
     "year_slider": "Selecciona Año a Evaluar:" if is_es else "Select Year to Benchmark:",
@@ -115,37 +117,66 @@ month_names = (
 st.title(T["title"])
 st.markdown(T["subtitle"])
 
-# 3. Cargar dataset calibrado
+# 3. Cargar dataset calibrado (contiene Chile completo de Arica a Magallanes)
 @st.cache_data
 def load_data():
     return pd.read_csv("harmonized_chile.csv")
 
 df = load_data()
 
-# 4. Barra Lateral: Filtros de Ubicación y Métrica
-st.sidebar.header(T["aoi_header"])
-preset_keys = ["Biobío & Ñuble", "Valparaíso", "La Araucanía", "All Chile", "Custom Coordinates"]
+# 4. Barra Lateral: País completo, las 16 Regiones de Chile (Norte a Sur) y Coordenadas Libres
+REGIONS_BOUNDS = {
+    "All Chile": (-56.0, -17.0, -76.0, -66.0),
+    "Arica y Parinacota": (-19.25, -17.50, -70.50, -68.75),
+    "Tarapacá": (-21.65, -18.90, -70.50, -68.25),
+    "Antofagasta": (-26.10, -20.90, -70.80, -66.80),
+    "Atacama": (-29.60, -25.25, -71.80, -68.25),
+    "Coquimbo": (-32.30, -29.00, -71.80, -69.75),
+    "Valparaíso": (-33.90, -32.00, -72.00, -69.90),
+    "Región Metropolitana": (-34.30, -32.90, -71.80, -69.75),
+    "O'Higgins": (-35.05, -33.85, -72.20, -70.00),
+    "Maule": (-36.55, -34.70, -72.85, -70.25),
+    "Ñuble": (-37.25, -36.00, -73.00, -71.00),
+    "Biobío": (-38.50, -36.40, -73.80, -71.00),
+    "La Araucanía": (-39.65, -37.55, -73.60, -70.80),
+    "Los Ríos": (-40.70, -39.25, -73.80, -71.50),
+    "Los Lagos": (-44.10, -40.25, -74.90, -71.50),
+    "Aysén": (-49.30, -43.60, -75.80, -71.00),
+    "Magallanes": (-56.00, -48.50, -75.80, -66.20),
+}
+
+preset_keys = list(REGIONS_BOUNDS.keys()) + ["Custom Coordinates"]
 preset_labels = {
-    "Biobío & Ñuble": "Biobío & Ñuble",
-    "Valparaíso": "Valparaíso",
-    "La Araucanía": "La Araucanía",
     "All Chile": T["all_chile"],
+    "Arica y Parinacota": "XV · Arica y Parinacota",
+    "Tarapacá": "I · Tarapacá",
+    "Antofagasta": "II · Antofagasta",
+    "Atacama": "III · Atacama",
+    "Coquimbo": "IV · Coquimbo",
+    "Valparaíso": "V · Valparaíso",
+    "Región Metropolitana": "RM · Metropolitana",
+    "O'Higgins": "VI · O'Higgins",
+    "Maule": "VII · Maule",
+    "Ñuble": "XVI · Ñuble",
+    "Biobío": "VIII · Biobío",
+    "La Araucanía": "IX · La Araucanía",
+    "Los Ríos": "XIV · Los Ríos",
+    "Los Lagos": "X · Los Lagos",
+    "Aysén": "XI · Aysén",
+    "Magallanes": "XII · Magallanes",
     "Custom Coordinates": T["custom_coords"],
 }
+
+st.sidebar.header(T["aoi_header"])
 preset = st.sidebar.selectbox(
     T["preset_label"],
     preset_keys,
+    index=preset_keys.index("Biobío"),
     format_func=lambda k: preset_labels[k]
 )
 
-if preset == "Biobío & Ñuble":
-    lat_min, lat_max, lon_min, lon_max = -38.5, -36.0, -73.8, -71.0
-elif preset == "Valparaíso":
-    lat_min, lat_max, lon_min, lon_max = -33.6, -32.2, -71.8, -70.5
-elif preset == "La Araucanía":
-    lat_min, lat_max, lon_min, lon_max = -39.6, -37.5, -73.6, -71.0
-elif preset == "All Chile":
-    lat_min, lat_max, lon_min, lon_max = -56.0, -17.0, -76.0, -66.0
+if preset in REGIONS_BOUNDS:
+    lat_min, lat_max, lon_min, lon_max = REGIONS_BOUNDS[preset]
 else:
     lat_min = st.sidebar.number_input(T["min_lat"], value=-38.5, format="%.2f")
     lat_max = st.sidebar.number_input(T["max_lat"], value=-36.0, format="%.2f")
@@ -436,7 +467,7 @@ with tab_dashboard:
 
     st.markdown("---")
 
-    # Mapa Espacial Normalizado con Zoom Dinámico y Descarga CSV
+    # Mapa Espacial Normalizado con Zoom Dinámico Logarítmico y Descarga CSV
     col_map, col_dl = st.columns([2.2, 1])
 
     with col_map:
@@ -452,14 +483,7 @@ with tab_dashboard:
             center_lat = (lat_min + lat_max) / 2.0
             center_lon = (lon_min + lon_max) / 2.0
             span = max(abs(lat_max - lat_min), abs(lon_max - lon_min))
-            if span > 20:
-                zoom_lvl = 3.2
-            elif span > 8:
-                zoom_lvl = 4.8
-            elif span > 3:
-                zoom_lvl = 5.8
-            else:
-                zoom_lvl = 6.8
+            zoom_lvl = float(np.clip(8.2 - np.log2(max(span, 0.5)), 3.2, 7.5))
 
             max_bubble_px = 30.0
             map_func = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
@@ -569,8 +593,8 @@ with tab_citizen_guide:
             )
             st.markdown(
                 "#### 🚨 Anomalía vs. Mediana (%)\n"
-                "Indica cuánto subió o bajó el fuego respecto a un año normal. Por ejemplo, en **Biobío y Ñuble en 2023**, la anomalía fue de **+377.2%**: "
-                "eso significa casi **5 veces** la cantidad de fuego habitual."
+                "Indica cuánto subió o bajó el fuego respecto a un año normal. Por ejemplo, en **Biobío en 2023**, la anomalía fue de cientos por ciento sobre lo normal: "
+                "eso significa varias veces la cantidad de fuego habitual."
             )
 
         st.markdown("---")
@@ -638,7 +662,7 @@ with tab_citizen_guide:
             )
             st.markdown(
                 "#### 🚨 Anomaly vs. Median (%)\n"
-                "Shows how much fire activity increased or decreased compared to a normal year. For example, **Biobío & Ñuble in 2023** reached **+377.2%**—nearly **5 times** normal activity."
+                "Shows how much fire activity increased or decreased compared to a normal year. For example, **Biobío in 2023** spiked several hundred percent above its historical median."
             )
 
         st.markdown("---")
