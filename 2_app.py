@@ -297,13 +297,13 @@ monthly_raw = df_filtered.groupby(['year', 'month'])[value_col].sum().reset_inde
 monthly_totals = pd.merge(full_grid, monthly_raw, on=['year', 'month'], how='left').fillna(0)
 monthly_totals.loc[(monthly_totals['year'] == 2026) & (monthly_totals['month'] > 11), value_col] = np.nan
 
-# Ventana crítica histórica (Top 3 meses en 2000–2025)
+# Ventana crítica histórica por carga total (Top 3 meses en 2000–2025, incluye picos máximos)
 hist_complete = monthly_totals[monthly_totals['year'] < 2026]
-month_medians = hist_complete.groupby('month')[value_col].median()
-top3_months = month_medians.nlargest(3)
+month_totals_hist = hist_complete.groupby('month')[value_col].sum()
+top3_months = month_totals_hist.nlargest(3)
 top3_indices = sorted(top3_months.index.tolist())
 top3_names = " – ".join([month_names[i - 1] for i in top3_indices])
-top3_share = (top3_months.sum() / month_medians.sum() * 100) if month_medians.sum() > 0 else 0.0
+top3_share = (top3_months.sum() / month_totals_hist.sum() * 100) if month_totals_hist.sum() > 0 else 0.0
 
 # Totales anuales y mediana de años completos (2000–2025)
 annual_totals = monthly_totals.groupby('year')[value_col].sum()
@@ -1014,30 +1014,55 @@ with col_side:
                 if selected_idx != -1 and exact_zone_display:
                     active_sector = exact_zone_display
                     muni_target = f"de la Municipalidad de {exact_comuna_name}" if exact_comuna_name else "de la Municipalidad"
+                    p_lat = float(map_agg.loc[selected_idx, "lat_plot"])
+                    p_lon = float(map_agg.loc[selected_idx, "lon_plot"])
                 else:
-                    top_lat = float(map_agg.loc[0, "lat_plot"])
-                    top_lon = float(map_agg.loc[0, "lon_plot"])
-                    osm_top, osm_top_comuna = reverse_geocode_exact(round(top_lat, 4), round(top_lon, 4), True)
+                    p_lat = float(map_agg.loc[0, "lat_plot"])
+                    p_lon = float(map_agg.loc[0, "lon_plot"])
+                    osm_top, osm_top_comuna = reverse_geocode_exact(round(p_lat, 4), round(p_lon, 4), True)
                     active_sector = osm_top if osm_top else map_agg.loc[0, "localidad"]
                     comuna_clean = osm_top_comuna if osm_top_comuna else map_agg.loc[0, "comuna_ref"]
                     muni_target = f"de la Municipalidad de {comuna_clean}" if comuna_clean else "de la Municipalidad"
+
+                df_scope = df_filtered[
+                    (df_filtered["lat_exact"].between(p_lat - 0.15, p_lat + 0.15)) &
+                    (df_filtered["lon_exact"].between(p_lon - 0.15, p_lon + 0.15))
+                ]
+                if df_scope.empty:
+                    df_scope = df_filtered
+                scope_label = f"{region_display} — {active_sector}"
             else:
-                active_sector = region_display
+                df_scope = df_filtered
+                scope_label = region_display
                 muni_target = "de la Municipalidad"
 
+            hist_scope = df_scope[df_scope["year"] < 2026]
+            if hist_scope.empty:
+                hist_scope = df_scope
+
+            month_sums = hist_scope.groupby("month")[value_col].sum().reindex(range(1, 13), fill_value=0)
+            if month_sums.sum() > 0:
+                local_top3 = month_sums.nlargest(3)
+                local_top3_idx = sorted(local_top3.index.tolist())
+                mail_months = " – ".join([month_names[i - 1] for i in local_top3_idx])
+                mail_share = local_top3.sum() / month_sums.sum() * 100
+            else:
+                mail_months = top3_names
+                mail_share = top3_share
+
             st.markdown(
-                f"**Solicitud preventiva para tu comuna ({region_display}):**\n"
-                f"Copia este texto y envíalo antes de **{top3_names}** a tu municipalidad o a las instituciones de prevención:"
+                f"**Solicitud preventiva para tu comuna ({scope_label}):**\n"
+                f"Copia este texto y envíalo antes de **{mail_months}** a tu municipalidad o a las instituciones de prevención:"
             )
             msg_muni = (
                 f"Estimado equipo de Emergencias {muni_target}:\n"
-                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} — {active_sector}) "
-                f"concentra el {top3_share:.0f}% de los incendios entre {top3_names}. "
+                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({scope_label}) "
+                f"concentra el {mail_share:.0f}% de los focos de calor históricos entre {mail_months}. "
                 f"Solicitamos informar el calendario de limpieza de maleza y mantención de cortafuegos preventivos para nuestro sector."
             )
             st.text_area("Mensaje listo para copiar:", value=msg_muni, height=160)
 
-            mailto_subject = quote(f"Solicitud preventiva de cortafuegos - {active_sector}")
+            mailto_subject = quote(f"Solicitud preventiva de cortafuegos - {scope_label}")
             mailto_body = quote(msg_muni)
             mailto_link = f"mailto:consulta.oirs@conaf.cl,oirs@senapred.gob.cl?subject={mailto_subject}&body={mailto_body}"
 
