@@ -70,67 +70,7 @@ def reverse_geocode_exact(lat_round, lon_round, is_es_flag=True):
         pass
     return None, ""
 
-# 4. Datos Meteorológicos y Calidad del Aire en Tiempo Real y Diario (Open-Meteo, sin API key)
-@st.cache_data(ttl=1800, show_spinner=False)
-def fetch_live_weather_and_air(lat_round, lon_round):
-    weather_data = None
-    air_data = None
-    try:
-        w_url = (
-            f"https://api.open-meteo.com/v1/forecast?"
-            f"latitude={lat_round}&longitude={lon_round}"
-            f"&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m"
-            f"&daily=temperature_2m_max,temperature_2m_min,wind_speed_10m_max,relative_humidity_2m_min"
-            f"&timezone=America%2FSantiago&forecast_days=7"
-        )
-        req_w = urllib.request.Request(w_url, headers={"User-Agent": "ChileWildfireCalendar-NASA-App/1.0"})
-        with urllib.request.urlopen(req_w, timeout=3.0) as resp_w:
-            weather_data = json.loads(resp_w.read().decode("utf-8"))
-    except Exception:
-        pass
-
-    try:
-        a_url = (
-            f"https://air-quality-api.open-meteo.com/v1/air-quality?"
-            f"latitude={lat_round}&longitude={lon_round}"
-            f"&current=pm10,pm2_5,carbon_monoxide,european_aqi"
-            f"&hourly=pm2_5,pm10"
-            f"&timezone=America%2FSantiago&forecast_days=3"
-        )
-        req_a = urllib.request.Request(a_url, headers={"User-Agent": "ChileWildfireCalendar-NASA-App/1.0"})
-        with urllib.request.urlopen(req_a, timeout=3.0) as resp_a:
-            air_data = json.loads(resp_a.read().decode("utf-8"))
-    except Exception:
-        pass
-
-    return weather_data, air_data
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_historical_temp(lat_round, lon_round, year_val, m_start, m_end):
-    if year_val > 2025:
-        return None
-    start_date = f"{year_val}-{m_start:02d}-01"
-    last_day_map = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30, 7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
-    end_day = last_day_map.get(m_end, 28)
-    end_date = f"{year_val}-{m_end:02d}-{end_day:02d}"
-    try:
-        h_url = (
-            f"https://archive-api.open-meteo.com/v1/archive?"
-            f"latitude={lat_round}&longitude={lon_round}"
-            f"&start_date={start_date}&end_date={end_date}"
-            f"&daily=temperature_2m_max&timezone=America%2FSantiago"
-        )
-        req_h = urllib.request.Request(h_url, headers={"User-Agent": "ChileWildfireCalendar-NASA-App/1.0"})
-        with urllib.request.urlopen(req_h, timeout=3.0) as resp_h:
-            data_h = json.loads(resp_h.read().decode("utf-8"))
-            temps = [t for t in data_h.get("daily", {}).get("temperature_2m_max", []) if t is not None]
-            if temps:
-                return float(np.mean(temps)), float(np.max(temps))
-    except Exception:
-        pass
-    return None
-
-# 5. Límites y Polígonos Exactos de las 16 Regiones de Chile
+# 4. Límites y Polígonos Exactos de las 16 Regiones de Chile
 REGIONS_BOUNDS = {
     "All Chile": (-56.0, -17.0, -76.0, -66.0),
     "Arica y Parinacota": (-19.25, -17.50, -70.50, -68.75),
@@ -206,7 +146,7 @@ def make_circle_coords(lat_c, lon_c, radius_km, num_pts=48):
     dlon = (radius_km / (111.0 * max(np.cos(np.radians(lat_c)), 0.1))) * np.sin(angles)
     return list(lat_c + dlat), list(lon_c + dlon)
 
-# 6. Cabecera Accesible (Idioma + Daltonismo + Baja Visión / Texto Grande)
+# 5. Cabecera Accesible (Idioma + Daltonismo + Baja Visión / Texto Grande)
 head_title, head_lang, head_color, head_vision = st.columns([2.1, 0.9, 1.3, 1.1])
 
 with head_lang:
@@ -291,16 +231,16 @@ with head_title:
 
 if is_es:
     st.info(
-        "**¿Qué hace esta aplicación?** Unifica 26 años de observaciones satelitales de la NASA (2000–2026) corrigiendo las diferencias entre satélites antiguos y modernos para mostrar un historial confiable de focos de calor y **potencia térmica (FRP)** en todo Chile, junto con **temperatura, viento y calidad del aire**.\n\n"
+        "**¿Qué hace esta aplicación?** Unifica 26 años de observaciones satelitales de la NASA (2000–2026) corrigiendo las diferencias entre satélites antiguos y modernos para mostrar un historial confiable de focos de calor y **potencia térmica (FRP)** en todo Chile.\n\n"
         "**¿En qué ayuda?** Permite a vecinos, municipios e investigadores identificar **qué meses del año son más peligrosos**, **qué porcentaje de incendios ocurre en cada temporada** y **qué comunas o sectores concentran mayor recurrencia de fuego**."
     )
 else:
     st.info(
-        "**What does this app do?** It unifies 26 years of NASA satellite fire observations (2000–2026), calibrating older and newer sensors into a single consistent record across Chile, alongside **temperature, wind, and air quality**.\n\n"
+        "**What does this app do?** It unifies 26 years of NASA satellite fire observations (2000–2026), calibrating older and newer sensors into a single consistent record across Chile.\n\n"
         "**How does it help?** It helps residents, municipalities, and researchers identify **which months carry the highest fire risk**, **what percentage of annual fires falls in each season**, and **which communes experience recurring fires**."
     )
 
-# 7. Tutorial / Guía Visual Grande y Destacada al Inicio
+# 6. Tutorial / Guía Visual Grande y Destacada al Inicio
 st.markdown(
     f"### {'¿Cómo usar esta página en 5 pasos?' if is_es else 'How to use this page in 5 simple steps'}"
 )
@@ -311,7 +251,7 @@ tutorial_steps = (
         ("2. Nivel de Detalle", "Elige *Ciudadanía* (simple y con audio), *Municipios* (QGIS) o *Investigadores*."),
         ("3. Año y Rango de Meses", "Usa el desplegable o flechas de año y elige un trimestre, semestre o rango de meses."),
         ("4. Revisa el Calendario", "Mira qué meses y años tuvieron mayor actividad y compara con lo normal."),
-        ("5. Mapa Satelital y Clima", "Explora el mapa en vista satélite o calles, revisa temperatura, aire y contacta a CONAF.")
+        ("5. Mapa Satelital y Ayuda", "Explora el mapa en vista satélite o calles, revisa los sectores críticos y contacta a CONAF.")
     ]
     if is_es else
     [
@@ -319,7 +259,7 @@ tutorial_steps = (
         ("2. Detail Level", "Select *Citizens* (plain language + audio), *Municipalities*, or *Researchers*."),
         ("3. Year & Month Range", "Use the year selector or arrows and pick a quarter, semester, or custom months."),
         ("4. Read Calendar", "Spot which months and years peaked and compare against historical baselines."),
-        ("5. Satellite Map & Weather", "Explore satellite/street layers, check weather & air quality, and send alerts.")
+        ("5. Satellite Map & Help", "Explore satellite/street layers, inspect affected sectors, and send preventive alerts.")
     ]
 )
 for col_t, (t_head, t_body) in zip(tut_cols, tutorial_steps):
@@ -336,7 +276,7 @@ for col_t, (t_head, t_body) in zip(tut_cols, tutorial_steps):
 
 st.markdown("---")
 
-# 8. Paso 1 y Paso 2: Territorio y Nivel de Detalle
+# 7. Paso 1 y Paso 2: Territorio y Nivel de Detalle
 preset_keys = list(REGIONS_BOUNDS.keys()) + ["Custom Coordinates"]
 preset_labels = {
     "All Chile": "Todo Chile (País Completo)" if is_es else "All Chile (Full Country)",
@@ -413,7 +353,7 @@ with opt_col2:
         value=(audience != "scientist")
     )
 
-# 9. Filtrado Espacial (Caja + Polígono Regional Exacto + Filtro Industrial Opcional)
+# 8. Filtrado Espacial (Caja + Polígono Regional Exacto + Filtro Industrial Opcional)
 df_filtered = df[
     (df['lat_exact'].between(lat_min, lat_max)) &
     (df['lon_exact'].between(lon_min, lon_max))
@@ -492,7 +432,7 @@ def step_year_cb(delta):
         new_idx = int(np.clip(idx + delta, 0, len(years_available) - 1))
         st.session_state["selected_year_state"] = years_available[new_idx]
 
-# 10. Paso 3: Selección Cómoda de Año (Desplegable + Flechas) y Rango de Meses
+# 9. Paso 3: Selección Cómoda de Año (Desplegable + Flechas) y Rango de Meses
 st.subheader("Paso 3 · Selecciona Año y Rango de Meses" if is_es else "Step 3 · Select Year & Month Range")
 
 q1, q2, q3 = st.columns(3)
@@ -656,7 +596,7 @@ df_map_source = df_filtered[
 
 region_display = preset_labels[preset]
 
-# 11. Diagnóstico Comparativo + Contexto de Incendios Rápidos Urbano-Forestales
+# 10. Diagnóstico Comparativo + Contexto de Incendios Rápidos Urbano-Forestales
 if median_baseline > 0:
     ratio = total_selected / median_baseline
     pct_diff = (ratio - 1.0) * 100
@@ -792,7 +732,7 @@ components.html(
     height=46
 )
 
-# 12. Indicadores Numéricos (KPIs con Porcentaje del Rango y Potencia FRP)
+# 11. Indicadores Numéricos (KPIs con Porcentaje del Rango y Potencia FRP)
 frp_selected = float(
     df_filtered[(df_filtered['year'] == selected_year) & (df_filtered['month'].isin(effective_months))]['harmonized_frp'].sum()
 )
@@ -826,7 +766,7 @@ else:
 
 st.markdown("---")
 
-# 13. Calendario Histórico
+# 12. Calendario Histórico
 calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=value_col).reindex(columns=range(1, 13))
 max_monthly_all_time = max(float(monthly_totals[value_col].max()), 1.0)
 
@@ -999,7 +939,7 @@ with st.expander(
 
 st.markdown("---")
 
-# 14. Catálogo Denso de Comunas, Localidades y Parques de Chile
+# 13. Catálogo Denso de Comunas, Localidades y Parques de Chile
 CHILE_LOCALITIES = [
     ("Arica", -18.48, -70.31, "urban"),
     ("Putre", -18.20, -69.56, "semi_arid"),
@@ -1118,16 +1058,12 @@ diffs = diffs[diffs > 1e-5]
 native_res = float(np.min(diffs)) if len(diffs) > 0 else 0.05
 
 st.subheader(
-    f"Paso 5 · Mapa Interactivo (Satélite / Calles), Clima y Calidad del Aire — {period_title}"
+    f"Paso 5 · Mapa Interactivo (Satélite / Calles) y Sectores Afectados — {period_title}"
     if is_es else
-    f"Step 5 · Interactive Map (Satellite / Streets), Weather & Air Quality — {period_title}"
+    f"Step 5 · Interactive Map (Satellite / Streets) & Affected Sectors — {period_title}"
 )
 
 col_map, col_side = st.columns([2.2, 1])
-
-active_lat_for_weather = float((df_filtered['lat_exact'].min() + df_filtered['lat_exact'].max()) / 2.0)
-active_lon_for_weather = float((df_filtered['lon_exact'].min() + df_filtered['lon_exact'].max()) / 2.0)
-active_place_for_weather = region_display
 
 with col_map:
     # Controles interactivos superiores del mapa
@@ -1461,15 +1397,12 @@ with col_map:
         if selected_idx != -1 and not map_agg.empty:
             sel_row = map_agg.loc[selected_idx]
             s_lat, s_lon = float(sel_row["lat_plot"]), float(sel_row["lon_plot"])
-            active_lat_for_weather, active_lon_for_weather = s_lat, s_lon
             osm_exact, osm_comuna = reverse_geocode_exact(round(s_lat, 4), round(s_lon, 4), is_es)
             exact_zone_display = osm_exact if osm_exact else sel_row["localidad"]
             exact_comuna_name = osm_comuna if osm_comuna else sel_row["comuna_ref"]
-            active_place_for_weather = exact_zone_display
 
             gmaps_url = f"https://www.google.com/maps/search/?api=1&query={s_lat:.5f},{s_lon:.5f}"
             firms_url = f"https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@{s_lon:.4f},{s_lat:.4f},13z"
-            windy_url = f"https://www.windy.com/{s_lat:.4f}/{s_lon:.4f}?{s_lat:.4f},{s_lon:.4f},11"
 
             if sel_row["zone_type"] == "industrial_desert":
                 origin_note = (
@@ -1490,124 +1423,8 @@ with col_map:
                 f"(**{sel_row['harmonized_frp']:,.0f} MW** {'potencia radiativa' if is_es else 'radiative power'})\n\n"
                 f"{origin_note}\n\n"
                 f"[Abrir en Google Maps]({gmaps_url})  |  "
-                f"[Focos activos 24h NASA FIRMS]({firms_url})  |  "
-                f"[Viento y humo en vivo (Windy)]({windy_url})"
+                f"[Focos activos 24h NASA FIRMS]({firms_url})"
             )
-        elif not map_agg.empty:
-            active_lat_for_weather = float(map_agg.loc[0, "lat_plot"])
-            active_lon_for_weather = float(map_agg.loc[0, "lon_plot"])
-            active_place_for_weather = f"{region_display} ({map_agg.loc[0, 'localidad']})"
-
-        # Bloque de Temperatura, Calidad del Aire y Riesgo Diario (Tipo Windy)
-        st.markdown(
-            f"#### {'Estado Diario: Temperatura, Calidad del Aire y Riesgo Meteorológico' if is_es else 'Daily Status: Temperature, Air Quality & Fire Weather'} — {active_place_for_weather}"
-        )
-        w_data, a_data = fetch_live_weather_and_air(round(active_lat_for_weather, 2), round(active_lon_for_weather, 2))
-        hist_temp_info = fetch_historical_temp(round(active_lat_for_weather, 2), round(active_lon_for_weather, 2), selected_year, m_start, m_end)
-
-        if w_data and "current" in w_data:
-            cur_w = w_data["current"]
-            t_now = cur_w.get("temperature_2m", 0.0)
-            rh_now = cur_w.get("relative_humidity_2m", 0.0)
-            wind_now = cur_w.get("wind_speed_10m", 0.0)
-            gust_now = cur_w.get("wind_gusts_10m", 0.0)
-
-            cur_a = a_data.get("current", {}) if a_data else {}
-            pm25 = cur_a.get("pm2_5", None)
-            co_val = cur_a.get("carbon_monoxide", None)
-
-            wc1, wc2, wc3, wc4 = st.columns(4)
-            wc1.metric(
-                "Temperatura actual" if is_es else "Current Temp",
-                f"{t_now:.1f} °C",
-                delta=(
-                    f"Máx {selected_year}: {hist_temp_info[0]:.1f}°C"
-                    if (hist_temp_info and is_es) else
-                    (f"Avg max {selected_year}: {hist_temp_info[0]:.1f}°C" if hist_temp_info else None)
-                ),
-                delta_color="off"
-            )
-            wc2.metric("Humedad relativa" if is_es else "Relative Humidity", f"{rh_now:.0f}%")
-            wc3.metric(
-                "Viento / Rachas" if is_es else "Wind / Gusts",
-                f"{wind_now:.0f} km/h",
-                delta=f"{'Rachas' if is_es else 'Gusts'}: {gust_now:.0f} km/h",
-                delta_color="off"
-            )
-            if pm25 is not None:
-                air_status = (
-                    ("Buena" if pm25 <= 15 else ("Moderada" if pm25 <= 35 else "Mala / Humo"))
-                    if is_es else
-                    ("Good" if pm25 <= 15 else ("Moderate" if pm25 <= 35 else "Poor / Smoke"))
-                )
-                wc4.metric(
-                    "Calidad del Aire (PM2.5)" if is_es else "Air Quality (PM2.5)",
-                    f"{pm25:.1f} µg/m³",
-                    delta=f"{air_status} · CO: {co_val:.0f} µg/m³" if co_val is not None else air_status,
-                    delta_color="off"
-                )
-            else:
-                wc4.metric("Calidad del Aire" if is_es else "Air Quality", "N/D")
-
-            # Regla 30-30-30 de propagación de incendios
-            rule30_flags = []
-            if t_now >= 30.0:
-                rule30_flags.append(f"Temperatura ≥ 30°C ({t_now:.1f}°C)")
-            if rh_now <= 30.0:
-                rule30_flags.append(f"Humedad ≤ 30% ({rh_now:.0f}%)")
-            if wind_now >= 30.0 or gust_now >= 30.0:
-                rule30_flags.append(f"Viento/Rachas ≥ 30 km/h ({max(wind_now, gust_now):.0f} km/h)")
-
-            windy_direct = f"https://www.windy.com/{active_lat_for_weather:.4f}/{active_lon_for_weather:.4f}?{active_lat_for_weather:.4f},{active_lon_for_weather:.4f},10"
-            if len(rule30_flags) >= 2:
-                st.warning(
-                    f"**Alerta Meteorológica de Propagación (Regla 30-30-30):** Se cumplen condiciones críticas hoy ({', '.join(rule30_flags)}). "
-                    f"[Ver mapa animado de viento y humo en Windy]({windy_direct})"
-                    if is_es else
-                    f"**Fire Weather Warning (30-30-30 Rule):** Critical conditions today ({', '.join(rule30_flags)}). "
-                    f"[Open live wind & smoke map on Windy]({windy_direct})"
-                )
-            else:
-                st.caption(
-                    f"Condiciones meteorológicas diarias obtenidas vía Open-Meteo. [Abrir capa interactiva de viento, temperatura y humo en Windy.com]({windy_direct})"
-                    if is_es else
-                    f"Daily weather and air quality via Open-Meteo. [Open interactive wind, temperature & smoke map on Windy.com]({windy_direct})"
-                )
-
-            # Pronóstico diario de los próximos 7 días (Temperatura Máxima y Viento)
-            daily_w = w_data.get("daily", {})
-            if daily_w.get("time"):
-                df_daily_fc = pd.DataFrame({
-                    "Fecha": daily_w["time"],
-                    "Temp Max (°C)": daily_w["temperature_2m_max"],
-                    "Viento Max (km/h)": daily_w["wind_speed_10m_max"],
-                })
-                with st.expander(
-                    "Ver pronóstico diario de temperatura y viento (próximos 7 días)"
-                    if is_es else
-                    "View 7-day daily temperature & wind forecast"
-                ):
-                    fig_fc = go.Figure()
-                    fig_fc.add_trace(go.Bar(
-                        x=df_daily_fc["Fecha"],
-                        y=df_daily_fc["Temp Max (°C)"],
-                        name="Temp. Máxima (°C)" if is_es else "Max Temp (°C)",
-                        marker_color="#E6550D"
-                    ))
-                    fig_fc.add_trace(go.Scatter(
-                        x=df_daily_fc["Fecha"],
-                        y=df_daily_fc["Viento Max (km/h)"],
-                        name="Viento Máx. (km/h)" if is_es else "Max Wind (km/h)",
-                        mode="lines+markers",
-                        line=dict(color="#3182BD", width=3)
-                    ))
-                    fig_fc.update_layout(
-                        height=250,
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        font=dict(size=chart_font_size),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-                    st.plotly_chart(fig_fc, width='stretch')
 
         # Ranking Top 10 Sectores / Comunas más afectados en el período
         if not map_agg.empty:
@@ -1765,22 +1582,125 @@ with col_side:
 
 st.markdown("---")
 
-# 15. Base Técnica, Satélites y Preguntas Clave
-st.subheader("Satélites, Metodología y Preguntas Clave" if is_es else "Satellites, Methodology & FAQ")
+# 14. Guía Informativa: Prevención de Incendios, Satélites y Preguntas Clave
+st.subheader(
+    "Guía Informativa: Prevención, Satélites y Preguntas Frecuentes"
+    if is_es else
+    "Information Guide: Wildfire Prevention, Satellites & FAQ"
+)
 
-tab_sat, tab_how, tab_faq = st.tabs(
+tab_faq, tab_sat, tab_how = st.tabs(
     [
+        "Prevención y preguntas frecuentes",
         "Satélites utilizados",
-        "Qué se hizo en el proyecto",
-        "Preguntas frecuentes"
+        "Qué se hizo en el proyecto"
     ]
     if is_es else
     [
+        "Prevention & FAQ",
         "Satellites used",
-        "How it was built",
-        "FAQ"
+        "How it was built"
     ]
 )
+
+with tab_faq:
+    if is_es:
+        with st.expander("¿Cómo prevenir incendios forestales en el hogar, parcelas y barrios? (Guía práctica)", expanded=True):
+            st.markdown(
+                "En Chile, más del **99% de los incendios forestales se originan por acción humana** (por descuido, negligencia o intencionalidad), y el riesgo aumenta fuertemente en zonas de **interfaz urbano-forestal** (donde las casas colindan con cerros, bosques o pastizales).\n\n"
+                "**1. Prepara una zona de autoprotección alrededor de tu vivienda (antes de noviembre):**\n"
+                "* **Despeja los primeros 10 a 30 metros:** Elimina pasto seco, hojas acumuladas, ramas bajas de árboles y matorrales densos alrededor de casas, bodegas y cercos.\n"
+                "* **Limpia techos y canaletas:** Las pavesas (brasas transportadas por el aire) suelen iniciar incendios al caer sobre hojas secas acumuladas en techumbres y canaletas.\n"
+                "* **Ordena materiales inflamables:** Mantén leña, cilindros de gas, combustibles y pinturas lejos de la vivienda y protegidos bajo techo o en casetas cerradas.\n\n"
+                "**2. Evita chispas y fuentes de ignición en actividades cotidianas:**\n"
+                "* **Herramientas eléctricas y agrícolas:** No uses esmeriles angulares (galleteras), soldadoras ni desmalezadoras de cuchilla metálica cerca de vegetación seca en tardes calurosas; ten siempre agua o un extintor a mano.\n"
+                "* **Cero quemas de basura o rastrojos:** Nunca quemes desechos domésticos ni restos vegetales fuera del calendario legal autorizado y supervisado por **CONAF**.\n"
+                "* **Fogatas, cigarrillos y vidrios:** Enciende fuego solo en lugares habilitados, apágalo completamente con abundante agua y tierra hasta que no quede humo, y nunca arrojes colillas ni botellas de vidrio (pueden generar efecto lupa).\n\n"
+                "**3. Organización comunitaria y gestión municipal:**\n"
+                "* **Identifica vías de evacuación y puntos de agua:** Coordina con tus vecinos rutas de salida despejadas para vehículos de emergencia y ubica grifos, piscinas o estanques comunitarios.\n"
+                "* **Exige mantención preventiva:** Usa el mensaje automático del panel superior para solicitar a tu municipalidad limpieza de sitios eriazos, podas bajo tendidos eléctricos y cortafuegos antes de los meses críticos de tu comuna."
+            )
+
+        with st.expander("¿Qué hacer si ves humo, un foco de fuego o recibes alerta de evacuación?"):
+            st.markdown(
+                "**1. Avisa de inmediato a los equipos de emergencia (cada minuto cuenta):**\n"
+                "* **CONAF:** Llama gratis al **130**.\n"
+                "* **Bomberos:** Llama gratis al **132**.\n"
+                "* **Carabineros / PDI:** **133** o **134** (especialmente si observas conductas sospechosas o inicio intencional).\n"
+                "* Entrega referencias claras: comuna, nombre del camino o kilómetro de ruta, punto de referencia cercano y color/dirección de la columna de humo.\n\n"
+                "**2. Si recibes una alerta SAE de evacuación en tu celular:**\n"
+                "* **Evacúa de inmediato:** No esperes a ver las llamas cerca ni regreses a buscar objetos materiales; el fuego en quebradas y pendientes puede avanzar a gran velocidad.\n"
+                "* **Kit básico de salida rápida:** Ten preparada una mochila con agua, mascarillas (idealmente **N95 o KN95**), medicamentos esenciales, documentos de identidad, linterna, cargador portátil y correa/jaula para mascotas.\n\n"
+                "**3. Cómo proteger tu salud ante humo denso:**\n"
+                "* Cierra puertas y ventanas, y coloca paños húmedos en rendijas para reducir la entrada de humo al interior.\n"
+                "* Evita hacer deporte o esfuerzos físicos al aire libre mientras haya humo visible.\n"
+                "* Si debes salir, usa mascarilla **N95 o KN95** (las mascarillas quirúrgicas o de tela no filtran las partículas finas `PM2.5` del humo). Presta especial atención a niños, embarazadas, personas mayores y pacientes con asma o enfermedades cardíacas."
+            )
+
+        with st.expander("¿Cómo interpretar los focos de calor, la Potencia Radiativa (FRP) y los colores del mapa?"):
+            st.markdown(
+                "Este visor entrega dos indicadores complementarios observados desde el espacio:\n"
+                "* **Cantidad de Focos Calibrados:** Cuenta cuántas detecciones térmicas activas registraron los satélites en un mes o período. Refleja **extensión y persistencia** en el tiempo.\n"
+                "* **Potencia Radiativa del Fuego (FRP, en megawatts - MW):** Mide la **intensidad energética** del incendio (cuánta radiación infrarroja libera el fuego en el momento en que pasa el satélite). Un incendio muy intenso y rápido genera valores altísimos de FRP.\n"
+                "* **Escala de colores del mapa:** Los tonos más claros indican actividad baja o aislada, mientras que los tonos oscuros (rojo intenso en modo estándar o amarillo brillante en modo daltonismo) señalan los sectores con **mayor concentración histórica o potencia acumulada**.\n"
+                "* **Anillos de 5 km y 10 km:** Al hacer clic en cualquier punto del mapa, puedes activar anillos de distancia para evaluar qué tan cerca ocurrieron esos focos respecto a viviendas, escuelas o infraestructura crítica."
+            )
+
+        with st.expander("¿Por qué el megaincendio de Valparaíso (Febrero 2024) tiene menos focos totales que Biobío 2023?"):
+            st.markdown(
+                "Los satélites polares de la NASA/NOAA orbitan la Tierra pasando sobre cada punto de Chile entre **2 y 4 veces al día**.\n"
+                "* El megaincendio de **Viña del Mar, Quilpué y Villa Alemana (2–3 de febrero de 2024)** fue un evento de interfaz urbano-forestal extraordinariamente rápido y violento: avanzó en menos de **48 horas** sobre unas **10.000 hectáreas** densamente pobladas.\n"
+                "* En cambio, los megaincendios rurales de **Biobío, Ñuble y Maule (2017 y 2023)** ardieron durante **varias semanas** cubriendo más de **400.000 hectáreas** de plantaciones forestales y bosques.\n"
+                "* Por esa diferencia de duración y superficie, un incendio que arde durante 3 semanas acumula muchas más pasadas satelitales que uno de 36 horas. Sin embargo, al revisar **Febrero 2024 en Valparaíso** o cambiar la métrica a **Potencia Térmica (FRP)**, se observa claramente que marcó el máximo histórico de 26 años para esa región."
+            )
+
+        with st.expander("¿Por qué aparecen focos en el desierto del norte (ej. Calama o Antofagasta) y qué límites tiene el satélite?"):
+            st.markdown(
+                "**1. Fuentes industriales estacionarias en el norte:**\n"
+                "* Los sensores satelitales NASA FIRMS detectan cualquier punto de la superficie terrestre con temperatura anormalmente alta, sin distinguir si proviene de vegetación o de una instalación industrial.\n"
+                "* En regiones como **Antofagasta o Atacama**, los puntos que se repiten casi todos los meses en el mismo lugar corresponden a **fundiciones de cobre (como Chuquicamata), plantas termosolares de concentración o faenas mineras**. Por eso la aplicación incluye la casilla superior para ocultarlos automáticamente.\n\n"
+                "**2. Alcances y limitaciones del monitoreo satelital:**\n"
+                "* **Para qué sirve:** Es una herramienta de **planificación preventiva y análisis histórico (2000–2026)** que permite saber qué meses son más peligrosos en cada comuna y priorizar cortafuegos.\n"
+                "* **Qué no reemplaza:** Como los satélites pasan cada varias horas y las nubes muy densas pueden bloquear la visión infrarroja, un incendio recién iniciado puede tardar en aparecer en el satélite. Ante humo o fuego visible, **nunca esperes confirmación satelital: llama de inmediato al 130 (CONAF) o 132 (Bomberos)**."
+            )
+    else:
+        with st.expander("How to prevent wildfires around homes, rural properties, and neighborhoods (Practical Guide)", expanded=True):
+            st.markdown(
+                "In Chile, over **99% of wildfires are caused by human activity**, with the highest danger occurring in the **wildland-urban interface** where homes border hills, forests, or dry grassland.\n\n"
+                "**1. Build a defensible space around your home (before November):**\n"
+                "* **Clear a 10 to 30 meter buffer:** Remove dry grass, fallen leaves, low-hanging tree branches, and dense brush around homes and fences.\n"
+                "* **Clean roofs and gutters:** Wind-blown embers frequently ignite dry leaves accumulated on rooftops and rain gutters.\n"
+                "* **Store flammables safely:** Keep firewood, gas cylinders, and fuels away from house walls.\n\n"
+                "**2. Eliminate sparks and ignition sources:**\n"
+                "* Avoid operating angle grinders, welders, or metal-blade brush cutters near dry vegetation during hot afternoons; keep water or a fire extinguisher nearby.\n"
+                "* Never burn trash or agricultural waste outside legal **CONAF** burn windows, extinguish campfires completely with water and soil, and never discard cigarette butts or glass bottles outdoors.\n\n"
+                "**3. Community coordination:**\n"
+                "* Map clear evacuation routes and local water sources with neighbors, and use the side panel's pre-filled message to request municipal firebreak maintenance ahead of your commune's peak months."
+            )
+
+        with st.expander("What to do if you see smoke, fire, or receive an SAE evacuation alert?"):
+            st.markdown(
+                "* **Report immediately:** Call **130 (CONAF)**, **132 (Firefighters)**, or **133 (Carabineros)** with clear road/kilometer references.\n"
+                "* **Evacuate immediately on SAE alerts:** Leave right away toward official SENAPRED safe zones without returning for belongings; keep an emergency kit ready (water, **N95/KN95** masks, medications, IDs, flashlight, pet carriers).\n"
+                "* **Protect against smoke:** Close doors and windows with damp cloths along gaps, avoid outdoor exertion, and use **N95/KN95** masks to filter fine `PM2.5` smoke particles."
+            )
+
+        with st.expander("How to interpret Calibrated Hotspots, Fire Radiative Power (FRP), and map colors?"):
+            st.markdown(
+                "* **Calibrated Hotspots:** Counts active thermal detections across satellite overpasses, reflecting **spatial extent and duration**.\n"
+                "* **Fire Radiative Power (FRP, in MW):** Measures instantaneous **radiative heat output**, capturing burning intensity.\n"
+                "* **5 km & 10 km rings:** Select any hotspot on the map to display distance rings and evaluate proximity to populated areas."
+            )
+
+        with st.expander("Why does Valparaíso Feb 2024 have fewer total hotspot detections than Biobío 2023?"):
+            st.markdown(
+                "Polar-orbiting satellites pass 2–4 times per day. The Feb 2–3, 2024 Valparaíso megafire burned ~10,000 ha of dense urban-wildland interface in under 48 hours, whereas rural forestry megafires in Biobío/Maule burned >400,000 ha over several weeks. Switching to **Fire Intensity (FRP)** or inspecting **February 2024** shows it set Valparaíso's 26-year record."
+            )
+
+        with st.expander("Why do hotspots appear in the northern desert (e.g., Calama) and what are satellite limits?"):
+            st.markdown(
+                "NASA FIRMS detects all high-temperature surface anomalies, including copper smelters (such as Chuquicamata) and solar thermal plants in northern Chile. Because polar satellites pass every few hours and dense clouds can obscure thermal views, satellite data supports **prevention and historical planning**—always call **130** or **132** immediately if you spot smoke or fire."
+            )
 
 with tab_sat:
     if is_es:
@@ -1813,37 +1733,12 @@ with tab_how:
             "1. **Desduplicación orbital:** Se filtraron las pasadas redundantes cuando dos satélites observan el mismo incendio con minutos de diferencia.\n"
             "2. **Geometría óptica del píxel (`scan × track`):** Se calculó el área real observada en tierra cuando el sensor mira hacia los bordes del barrido (donde el píxel se estira hasta 9.6 veces).\n"
             "3. **Calibración mediante aprendizaje automático:** Usando los **14 años de operación simultánea (2012–2026)**, se entrenó un modelo *Gradient Boosting* con corrección de Duan para traducir MODIS a escala VIIRS (`R² lineal = 0.887`, sesgo acumulado `< 5%` en validación ciega).\n"
-            "4. **Geocodificación, clima y accesibilidad:** Se integró el dataset calibrado con identificación territorial exacta, meteorología y calidad del aire (Open-Meteo) y accesibilidad visual y auditiva."
+            "4. **Geocodificación y accesibilidad:** Se integró el dataset calibrado con identificación territorial exacta por comuna/sector y accesibilidad visual y auditiva."
         )
     else:
         st.markdown(
             "1. **Orbital de-duplication:** Removes redundant detections from overlapping satellite passes.\n"
             "2. **Optical pixel geometry (`scan × track`):** Accounts for off-nadir pixel stretching up to 9.6 km².\n"
             "3. **Cross-sensor Machine Learning:** Trains Gradient Boosting with Duan's smearing on the 2012–2026 overlap (`Linear R² = 0.887`, `< 5%` blind hindcast bias).\n"
-            "4. **Geocoding, weather & accessibility:** Integrates exact local identification, Open-Meteo weather/air quality, and visual/screen-reader accessibility."
+            "4. **Geocoding & accessibility:** Integrates exact local identification by commune/sector and visual/screen-reader accessibility."
         )
-
-with tab_faq:
-    if is_es:
-        with st.expander("¿Por qué el megaincendio de Valparaíso (Febrero 2024) tiene menos focos totales que Biobío 2023?"):
-            st.write(
-                "Los satélites polares pasan 2 a 4 veces al día. El incendio de Viña del Mar / Quilpué (2–3 de febrero de 2024) fue extremadamente violento y rápido (duró ~36 horas en un área urbana de ~10.000 hectáreas), "
-                "mientras que los megaincendios rurales de Biobío o Maule ardieron durante semanas cubriendo más de 400.000 hectáreas de plantaciones forestales. "
-                "Si cambias la métrica a 'Intensidad / Potencia Térmica (FRP)' o miras Febrero 2024 en Valparaíso, verás que marcó el máximo histórico de la región."
-            )
-        with st.expander("¿Por qué aparecen focos en el desierto del norte (ej. Calama o Antofagasta)?"):
-            st.write(
-                "Los satélites NASA FIRMS miden anomalías térmicas en superficie sin distinguir su origen. "
-                "En el norte de Chile, esas detecciones persistentes corresponden a fundiciones de cobre (como Chuquicamata), faenas mineras o plantas termosolares, no a incendios forestales."
-            )
-        with st.expander("¿De dónde provienen la temperatura, el viento y la calidad del aire?"):
-            st.write(
-                "Se consultan en tiempo real desde Open-Meteo (modelos meteorológicos globales y de composición atmosférica Copernicus) para las coordenadas exactas de la región o comuna seleccionada."
-            )
-    else:
-        with st.expander("Why does Valparaíso Feb 2024 have fewer total hotspot detections than Biobío 2023?"):
-            st.write(
-                "Polar-orbiting satellites pass 2–4 times per day. The Feb 2–3, 2024 Valparaíso megafire burned ~10,000 ha of dense urban-wildland interface in under 48 hours, whereas rural forestry megafires in Biobío/Maule burned >400,000 ha over several weeks."
-            )
-        with st.expander("Why do hotspots appear in the northern desert (e.g., Calama)?"):
-            st.write("NASA FIRMS detects surface thermal anomalies including copper smelters, mining operations, and solar plants.")
