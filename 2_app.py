@@ -326,7 +326,7 @@ if median_baseline > 0:
             st.error(
                 f"**ANOMALÍA EXTREMA en {region_display} ({period_title}):** "
                 f"**{pct_diff:+.1f}%** sobre la mediana histórica (**{ratio:.1f}x** lo habitual). "
-                f"El **{top3_share:.0f}%** de la carga anual ocurre en **{top3_names}**; priorizar cortafuegos en las celdas destacadas del mapa."
+                f"El **{top3_share:.0f}%** de la carga anual ocurre en **{top3_names}**; priorizar cortafuegos en los sectores destacados del mapa."
                 if is_es else
                 f"**EXTREME ANOMALY in {region_display} ({period_title}):** "
                 f"**{pct_diff:+.1f}%** above historical median (**{ratio:.1f}x** baseline). **{top3_share:.0f}%** concentrates in **{top3_names}**."
@@ -549,7 +549,7 @@ else:
 
 st.markdown("---")
 
-# 10. Mapa Espacial con Explicación Explícita de Cada Cuadrante
+# 10. Mapa Espacial Interactivo con Selector de Visualización (Círculos / Calor / Cuadrícula)
 CHILE_LOCALITIES = [
     ("Arica", -18.48, -70.31, "urban"),
     ("Iquique", -20.21, -70.15, "urban"),
@@ -637,18 +637,6 @@ st.subheader(
     if is_es else
     f"Step 5 · Geographic Distribution Across Terrain — {period_title}"
 )
-st.markdown(
-    (
-        f"**Qué representa cada cuadrícula del mapa:** El territorio está dividido en cuadrantes de `{grid_res}° × {grid_res}°` "
-        f"(aprox. **{cell_km:.1f} km** por lado). Cada cuadrado muestra la concentración de calor detectada en ese sector, "
-        f"comparada contra el máximo histórico de 26 años de **{region_display}**."
-    )
-    if is_es else
-    (
-        f"**What each map cell represents:** The terrain is divided into `{grid_res}° × {grid_res}°` quadrants "
-        f"(approx. **{cell_km:.1f} km** wide), showing thermal activity in that sector benchmarked against the 26-year historical peak of **{region_display}**."
-    )
-)
 
 col_map, col_side = st.columns([2.2, 1])
 
@@ -660,16 +648,49 @@ with col_map:
             "No fire hotspots recorded in this period for the selected area."
         )
     else:
-        map_style_choice = st.radio(
-            "Fondo del mapa:" if is_es else "Map background:",
-            ["osm", "dark"],
-            format_func=lambda k: (
-                ("Con ciudades, pueblos y caminos" if is_es else "Cities, towns & roads")
-                if k == "osm" else
-                ("Fondo oscuro (alto contraste)" if is_es else "Dark background (high contrast)")
-            ),
-            horizontal=True
-        )
+        m_ctrl1, m_ctrl2 = st.columns([1.4, 1])
+        with m_ctrl1:
+            viz_mode = st.radio(
+                "Cómo ver los datos en el mapa:" if is_es else "Map visualization style:",
+                ["bubbles", "heatmap", "grid"],
+                format_func=lambda k: {
+                    "bubbles": "Círculos de intensidad (Recomendado)" if is_es else "Intensity circles (Recommended)",
+                    "heatmap": "Nube de calor" if is_es else "Heat density cloud",
+                    "grid": "Cuadrícula técnica" if is_es else "Scientific grid cells",
+                }[k],
+                horizontal=True
+            )
+        with m_ctrl2:
+            map_style_choice = st.radio(
+                "Fondo del mapa:" if is_es else "Map background:",
+                ["osm", "dark"],
+                format_func=lambda k: (
+                    ("Con ciudades y caminos" if is_es else "Cities & roads")
+                    if k == "osm" else
+                    ("Fondo oscuro" if is_es else "Dark background")
+                ),
+                horizontal=True
+            )
+
+        if viz_mode == "bubbles":
+            st.caption(
+                "Cada círculo indica el centro donde se concentraron focos de calor; mientras más grande e intenso el círculo, mayor cantidad de fuego hubo en ese sector."
+                if is_es else
+                "Each circle marks the center of detected fire hotspots; larger and brighter circles indicate higher fire concentration."
+            )
+        elif viz_mode == "heatmap":
+            st.caption(
+                "La nube difuminada muestra las zonas donde se acumuló mayor calor durante el período seleccionado."
+                if is_es else
+                "The smoothed thermal cloud highlights where fire activity concentrated during the selected period."
+            )
+        else:
+            st.caption(
+                f"Malla de calibración ({grid_res}° × {grid_res}°, ~{cell_km:.1f} km por lado) usada para unificar MODIS (1 km) y VIIRS (375 m) sin sesgo histórico."
+                if is_es else
+                f"Calibration mesh ({grid_res}° × {grid_res}°, ~{cell_km:.1f} km wide) used to harmonize MODIS (1 km) and VIIRS (375 m) without historical bias."
+            )
+
         chosen_style = "open-street-map" if map_style_choice == "osm" else "carto-darkmatter"
 
         map_agg = (
@@ -679,9 +700,8 @@ with col_map:
                 harmonized_frp=('harmonized_frp', 'sum')
             )
             .reset_index()
-            .sort_values(by=value_col, ascending=False)
-            .reset_index(drop=True)
         )
+        map_agg = map_agg[map_agg[value_col] > 0].sort_values(by=value_col, ascending=False).reset_index(drop=True)
         map_agg["cell_id"] = map_agg.index.astype(str)
         loc_info = [describe_location(float(r["lat_bin"]), float(r["lon_bin"]), is_es) for _, r in map_agg.iterrows()]
         map_agg["localidad"] = [x[0] for x in loc_info]
@@ -690,9 +710,9 @@ with col_map:
         top_n = min(len(map_agg), 30)
         inspect_options = [-1] + list(range(top_n))
         selected_idx = st.selectbox(
-            "Inspeccionar sector específico (o hacer clic en el mapa):"
+            "Inspeccionar sector específico (o hacer clic sobre un punto del mapa):"
             if is_es else
-            "Inspect specific sector (or click directly on the map):",
+            "Inspect specific sector (or click a point on the map):",
             options=inspect_options,
             format_func=lambda idx: (
                 ("— Vista general de toda la región —" if is_es else "— Full region overview —")
@@ -700,25 +720,6 @@ with col_map:
                 f"#{idx + 1} · {map_agg.loc[idx, 'localidad']} ({map_agg.loc[idx, value_col]:,.0f} {unit_label})"
             )
         )
-
-        half = grid_res / 2.0
-        features = []
-        for _, row in map_agg.iterrows():
-            lat_c, lon_c = float(row["lat_bin"]), float(row["lon_bin"])
-            poly = [[
-                [lon_c - half, lat_c - half],
-                [lon_c + half, lat_c - half],
-                [lon_c + half, lat_c + half],
-                [lon_c - half, lat_c + half],
-                [lon_c - half, lat_c - half],
-            ]]
-            features.append({
-                "type": "Feature",
-                "id": row["cell_id"],
-                "geometry": {"type": "Polygon", "coordinates": poly},
-                "properties": {"cell_id": row["cell_id"]}
-            })
-        geojson_grid = {"type": "FeatureCollection", "features": features}
 
         if month_idx_choice == 0:
             hist_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
@@ -738,7 +739,7 @@ with col_map:
         if selected_idx != -1 and zoom_to_selected:
             center_lat = float(map_agg.loc[selected_idx, "lat_bin"])
             center_lon = float(map_agg.loc[selected_idx, "lon_bin"])
-            zoom_lvl = 9.2
+            zoom_lvl = 9.4
         elif preset != "All Chile" and preset != "Custom Coordinates":
             center_lat = float((df_filtered['lat_bin'].min() + df_filtered['lat_bin'].max()) / 2.0)
             center_lon = float((df_filtered['lon_bin'].min() + df_filtered['lon_bin'].max()) / 2.0)
@@ -753,11 +754,7 @@ with col_map:
             span = max(abs(lat_max - lat_min), abs(lon_max - lon_min))
             zoom_lvl = float(np.clip(8.3 - np.log2(max(span, 0.4)), 3.2, 8.2))
 
-        choro_func = px.choropleth_map if hasattr(px, "choropleth_map") else px.choropleth_mapbox
-        style_kwarg = {"map_style": chosen_style} if hasattr(px, "choropleth_map") else {"mapbox_style": chosen_style}
-
         hover_cols = {
-            "cell_id": False,
             "localidad": True,
             "lat_bin": ":.3f",
             "lon_bin": ":.3f",
@@ -766,28 +763,93 @@ with col_map:
         if audience != "citizen":
             hover_cols["harmonized_frp"] = ":,.1f"
 
-        fig_map = choro_func(
-            map_agg,
-            geojson=geojson_grid,
-            locations="cell_id",
-            featureidkey="id",
-            color=value_col,
-            color_continuous_scale=color_scale,
-            range_color=[0, hist_cell_max],
-            opacity=0.65,
-            zoom=zoom_lvl,
-            center={"lat": center_lat, "lon": center_lon},
-            hover_data=hover_cols,
-            labels={
-                "localidad": "Localidad cercana" if is_es else "Nearest locality",
-                "lat_bin": "Latitud" if is_es else "Latitude",
-                "lon_bin": "Longitud" if is_es else "Longitude",
-                "harmonized_hotspots": "Focos de calor" if is_es else "Calibrated Hotspots",
-                "harmonized_frp": "FRP (MW)"
-            },
-            **style_kwarg
-        )
-        fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(120,120,120,0.45)")
+        labels_map = {
+            "localidad": "Localidad cercana" if is_es else "Nearest locality",
+            "lat_bin": "Latitud" if is_es else "Latitude",
+            "lon_bin": "Longitud" if is_es else "Longitude",
+            "harmonized_hotspots": "Focos de calor" if is_es else "Calibrated Hotspots",
+            "harmonized_frp": "FRP (MW)"
+        }
+
+        if viz_mode == "bubbles":
+            scatter_func = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
+            style_kwarg = {"map_style": chosen_style} if hasattr(px, "scatter_map") else {"mapbox_style": chosen_style}
+            fig_map = scatter_func(
+                map_agg,
+                lat="lat_bin",
+                lon="lon_bin",
+                size=value_col,
+                color=value_col,
+                size_max=34,
+                color_continuous_scale=color_scale,
+                range_color=[0, hist_cell_max],
+                opacity=0.82,
+                zoom=zoom_lvl,
+                center={"lat": center_lat, "lon": center_lon},
+                hover_name="localidad",
+                hover_data=hover_cols,
+                labels=labels_map,
+                **style_kwarg
+            )
+        elif viz_mode == "heatmap":
+            density_func = px.density_map if hasattr(px, "density_map") else px.density_mapbox
+            style_kwarg = {"map_style": chosen_style} if hasattr(px, "density_map") else {"mapbox_style": chosen_style}
+            fig_map = density_func(
+                map_agg,
+                lat="lat_bin",
+                lon="lon_bin",
+                z=value_col,
+                radius=30,
+                color_continuous_scale=color_scale,
+                range_color=[0, hist_cell_max],
+                opacity=0.78,
+                zoom=zoom_lvl,
+                center={"lat": center_lat, "lon": center_lon},
+                hover_name="localidad",
+                hover_data=hover_cols,
+                labels=labels_map,
+                **style_kwarg
+            )
+        else:
+            half = grid_res / 2.0
+            features = []
+            for _, row in map_agg.iterrows():
+                lat_c, lon_c = float(row["lat_bin"]), float(row["lon_bin"])
+                poly = [[
+                    [lon_c - half, lat_c - half],
+                    [lon_c + half, lat_c - half],
+                    [lon_c + half, lat_c + half],
+                    [lon_c - half, lat_c + half],
+                    [lon_c - half, lat_c - half],
+                ]]
+                features.append({
+                    "type": "Feature",
+                    "id": row["cell_id"],
+                    "geometry": {"type": "Polygon", "coordinates": poly},
+                    "properties": {"cell_id": row["cell_id"]}
+                })
+            geojson_grid = {"type": "FeatureCollection", "features": features}
+            choro_func = px.choropleth_map if hasattr(px, "choropleth_map") else px.choropleth_mapbox
+            style_kwarg = {"map_style": chosen_style} if hasattr(px, "choropleth_map") else {"mapbox_style": chosen_style}
+            hover_grid = dict(hover_cols)
+            hover_grid["cell_id"] = False
+            fig_map = choro_func(
+                map_agg,
+                geojson=geojson_grid,
+                locations="cell_id",
+                featureidkey="id",
+                color=value_col,
+                color_continuous_scale=color_scale,
+                range_color=[0, hist_cell_max],
+                opacity=0.62,
+                zoom=zoom_lvl,
+                center={"lat": center_lat, "lon": center_lon},
+                hover_data=hover_grid,
+                labels=labels_map,
+                **style_kwarg
+            )
+            fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(120,120,120,0.45)")
+
         fig_map.update_layout(height=460, margin=dict(l=0, r=0, t=10, b=0))
 
         try:
@@ -800,7 +862,7 @@ with col_map:
         except TypeError:
             st.plotly_chart(fig_map, width='stretch')
 
-        if selected_idx != -1:
+        if selected_idx != -1 and not map_agg.empty:
             sel_row = map_agg.loc[selected_idx]
             s_lat, s_lon = float(sel_row["lat_bin"]), float(sel_row["lon_bin"])
             gmaps_url = f"https://www.google.com/maps/search/?api=1&query={s_lat:.4f},{s_lon:.4f}"
@@ -836,7 +898,7 @@ with col_side:
                 f"**Solicitud preventiva para tu comuna ({region_display}):**\n"
                 f"Copia este texto y envíalo a la oficina de emergencias de tu municipalidad antes de **{top3_names}**:"
             )
-            sample_sector = map_agg.loc[0, "localidad"] if not df_map_source.empty else region_display
+            sample_sector = map_agg.loc[0, "localidad"] if (not df_map_source.empty and not map_agg.empty) else region_display
             msg_muni = (
                 f"Estimado equipo de Emergencias de la Municipalidad:\n"
                 f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} - {sample_sector}) "
@@ -917,7 +979,7 @@ with tab_guide:
             "2. **Paso 2 (Nivel de detalle):** Selecciona *Ciudadanía* para lenguaje cotidiano, *Municipios* para gestión preventiva o *Investigadores* para métricas técnicas.\n"
             "3. **Paso 3 (Período):** Usa los botones rápidos o desliza la barra para elegir un año (y opcionalmente un mes específico).\n"
             "4. **Paso 4 (Calendario):** Revisa la cuadrícula de 26 años. Cada rectángulo es un mes; las columnas más intensas muestran la temporada crítica anual de tu región.\n"
-            "5. **Paso 5 (Mapa):** Selecciona un sector en el listado o haz clic sobre un cuadrante del mapa para acercarte y abrir el lugar exacto en Google Maps."
+            "5. **Paso 5 (Mapa):** Elige entre *Círculos de intensidad*, *Nube de calor* o *Cuadrícula técnica*, y selecciona cualquier sector para acercarte y verlo en Google Maps."
         )
     else:
         st.markdown(
@@ -925,7 +987,7 @@ with tab_guide:
             "2. **Step 2 (Detail level):** Pick *Citizens*, *Municipalities*, or *Researchers*.\n"
             "3. **Step 3 (Time period):** Use quick shortcuts or the year/month controls.\n"
             "4. **Step 4 (Calendar):** Read the 26-year monthly grid; each cell shows total detections for that month and year.\n"
-            "5. **Step 5 (Map):** Pick any sector or click a map quadrant to zoom in and open Google Maps."
+            "5. **Step 5 (Map):** Switch between *Intensity circles*, *Heat density cloud*, or *Scientific grid cells*, and pick any sector to inspect in Google Maps."
         )
 
 with tab_sat:
@@ -976,6 +1038,11 @@ with tab_faq:
                 "Los satélites NASA FIRMS miden anomalías térmicas en superficie sin distinguir su origen. "
                 "En el norte de Chile, esas detecciones persistentes corresponden a fundiciones de cobre (como Chuquicamata), faenas mineras o plantas termosolares, no a incendios forestales."
             )
+        with st.expander("¿Por qué el mapa ofrece ver círculos, nube de calor o cuadrícula?"):
+            st.write(
+                "Para unir 26 años de satélites distintos sin sesgo, los datos se agrupan en celdas de referencia. "
+                "Visualizarlos como círculos proporcionales o nube de calor facilita a cualquier persona ubicar el foco sin confundir el tamaño de la celda matemática con el tamaño real del incendio."
+            )
         with st.expander("¿Qué significa 'Lo normal (Mediana de 26 años)'?"):
             st.write(
                 "Es el valor central típico de un año o mes entre 2000 y 2025. Usar la mediana evita que años extremos (como 2017 o 2023) distorsionen la referencia de un año habitual."
@@ -987,5 +1054,7 @@ with tab_faq:
     else:
         with st.expander("Why do hotspots appear in the northern desert (e.g., Calama)?"):
             st.write("NASA FIRMS detects surface thermal anomalies including copper smelters, mining operations, and solar plants.")
+        with st.expander("Why does the map offer circles, heat cloud, or grid cells?"):
+            st.write("Proportional circles and heat clouds make it intuitive for anyone to locate fire concentration without mistaking the statistical calibration cell for the physical size of a single fire.")
         with st.expander("What does 'Typical Year (26-year median)' mean?"):
             st.write("It is the middle value across 2000–2025, preventing extreme megafire years from skewing the baseline.")
