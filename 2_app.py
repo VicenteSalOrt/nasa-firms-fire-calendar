@@ -542,7 +542,83 @@ else:
     st.markdown("---")
     st.subheader(f"🗺️ Mapa Espacial de Intensidad — {period_title}" if is_es else f"🗺️ Spatial Fire Intensity Map — {period_title}")
 
-# 11. Mapa Espacial de Extensión Real (Normalizado por Región / País)
+# 11. Mapa Espacial Interactivo con Inspector de Localidades y Google Maps
+CHILE_LOCALITIES = [
+    ("Arica", -18.48, -70.31, "urban"),
+    ("Iquique", -20.21, -70.15, "urban"),
+    ("Calama / Chuquicamata", -22.46, -68.93, "industrial_desert"),
+    ("San Pedro de Atacama", -22.91, -68.20, "desert"),
+    ("Antofagasta", -23.65, -70.40, "industrial_desert"),
+    ("Copiapó / Tierra Amarilla", -27.37, -70.33, "industrial_desert"),
+    ("Vallenar", -28.58, -70.76, "semi_arid"),
+    ("La Serena / Coquimbo", -29.90, -71.25, "semi_arid"),
+    ("Ovalle", -30.60, -71.20, "semi_arid"),
+    ("Illapel", -31.63, -71.17, "semi_arid"),
+    ("La Ligua / Petorca", -32.45, -71.23, "forest_agri"),
+    ("Quillota / Limache", -32.88, -71.25, "forest_agri"),
+    ("Valparaíso / Viña del Mar", -33.05, -71.62, "forest_agri"),
+    ("San Antonio", -33.59, -71.61, "forest_agri"),
+    ("Santiago (RM)", -33.45, -70.67, "forest_agri"),
+    ("Melipilla", -33.69, -71.21, "forest_agri"),
+    ("Rancagua / Machalí", -34.17, -70.74, "forest_agri"),
+    ("San Fernando", -34.58, -70.99, "forest_agri"),
+    ("Pichilemu", -34.39, -72.00, "forest_agri"),
+    ("Curicó", -34.98, -71.24, "forest_agri"),
+    ("Talca", -35.43, -71.66, "forest_agri"),
+    ("Constitución", -35.33, -72.41, "forest_agri"),
+    ("Linares", -35.85, -71.59, "forest_agri"),
+    ("Cauquenes", -35.97, -72.32, "forest_agri"),
+    ("Parral", -36.14, -71.83, "forest_agri"),
+    ("San Carlos", -36.42, -71.96, "forest_agri"),
+    ("Coelemu / Quirihue", -36.49, -72.70, "forest_agri"),
+    ("Chillán / Coihueco", -36.61, -72.10, "forest_agri"),
+    ("Quillón / Bulnes", -36.74, -72.47, "forest_agri"),
+    ("Yungay / Pemuco", -37.12, -72.01, "forest_agri"),
+    ("Penco / Tomé / Concepción", -36.74, -72.99, "forest_agri"),
+    ("Coronel / Lota / Santa Juana", -37.03, -73.14, "forest_agri"),
+    ("Cabrero / Yumbel", -37.04, -72.40, "forest_agri"),
+    ("Los Ángeles / Nacimiento", -37.47, -72.35, "forest_agri"),
+    ("Lebu / Cañete (Arauco)", -37.60, -73.65, "forest_agri"),
+    ("Angol / Collipulli", -37.80, -72.71, "forest_agri"),
+    ("Victoria / Traiguén", -38.23, -72.33, "forest_agri"),
+    ("Temuco / Padre Las Casas", -38.74, -72.59, "forest_agri"),
+    ("Villarrica / Pucón", -39.28, -72.23, "forest_agri"),
+    ("Valdivia / Mariquina", -39.81, -73.25, "forest_agri"),
+    ("La Unión / Río Bueno", -40.29, -73.08, "forest_agri"),
+    ("Osorno", -40.57, -73.13, "forest_agri"),
+    ("Puerto Montt / Puerto Varas", -41.47, -72.94, "forest_agri"),
+    ("Castro / Ancud (Chiloé)", -42.48, -73.76, "forest_agri"),
+    ("Chaitén / Futaleufú", -42.92, -72.71, "forest_agri"),
+    ("Coyhaique / Puerto Aysén", -45.57, -72.07, "forest_agri"),
+    ("Cochrane", -47.25, -72.57, "forest_agri"),
+    ("Puerto Natales", -51.73, -72.50, "forest_agri"),
+    ("Punta Arenas", -53.16, -70.91, "forest_agri"),
+]
+
+def describe_location(lat, lon, is_es_flag=True):
+    best_name, best_dist, best_type = "", 1e9, "forest_agri"
+    best_dlat, best_dlon = 0.0, 0.0
+    for name, l_lat, l_lon, l_type in CHILE_LOCALITIES:
+        dlat = (lat - l_lat) * 111.0
+        dlon = (lon - l_lon) * 111.0 * np.cos(np.radians(lat))
+        dist = float(np.hypot(dlat, dlon))
+        if dist < best_dist:
+            best_dist = dist
+            best_name = name
+            best_type = l_type
+            best_dlat, best_dlon = dlat, dlon
+    if best_dist < 14.0:
+        loc_str = f"Sector {best_name}" if is_es_flag else f"{best_name} area"
+    else:
+        ns = "N" if best_dlat >= 0 else "S"
+        ew = ("E" if best_dlon >= 0 else ("O" if is_es_flag else "W"))
+        loc_str = (
+            f"~{best_dist:.0f} km al {ns}{ew} de {best_name}"
+            if is_es_flag else
+            f"~{best_dist:.0f} km {ns}{ew} of {best_name}"
+        )
+    return loc_str, best_type
+
 col_map, col_side = st.columns([2.2, 1])
 
 with col_map:
@@ -553,13 +629,49 @@ with col_map:
             "No fire hotspots recorded in this period for the selected area."
         )
     else:
-        map_agg = df_map_source.groupby(['lat_bin', 'lon_bin']).agg(
-            harmonized_hotspots=('harmonized_hotspots', 'sum'),
-            harmonized_frp=('harmonized_frp', 'sum')
-        ).reset_index()
-        map_agg["cell_id"] = map_agg.index.astype(str)
+        map_style_choice = st.radio(
+            "🗺️ Capa base del mapa:" if is_es else "🗺️ Map base layer:",
+            ["osm", "dark"],
+            format_func=lambda k: (
+                ("📍 Mapa con Ciudades, Pueblos y Caminos" if is_es else "📍 Map with Cities, Towns & Roads")
+                if k == "osm" else
+                ("🌑 Mapa Oscuro (Alto Contraste)" if is_es else "🌑 Dark Map (High Contrast)")
+            ),
+            horizontal=True
+        )
+        chosen_style = "open-street-map" if map_style_choice == "osm" else "carto-darkmatter"
 
-        # Auto-detectar resolución de malla (ej. 0.025° ~2.7 km o 0.25° ~27 km)
+        map_agg = (
+            df_map_source.groupby(['lat_bin', 'lon_bin'])
+            .agg(
+                harmonized_hotspots=('harmonized_hotspots', 'sum'),
+                harmonized_frp=('harmonized_frp', 'sum')
+            )
+            .reset_index()
+            .sort_values(by=value_col, ascending=False)
+            .reset_index(drop=True)
+        )
+        map_agg["cell_id"] = map_agg.index.astype(str)
+        loc_info = [describe_location(float(r["lat_bin"]), float(r["lon_bin"]), is_es) for _, r in map_agg.iterrows()]
+        map_agg["localidad"] = [x[0] for x in loc_info]
+        map_agg["zone_type"] = [x[1] for x in loc_info]
+
+        # Inspector interactivo: sincroniza clic en el mapa o selección en lista
+        top_n = min(len(map_agg), 30)
+        inspect_options = [-1] + list(range(top_n))
+        selected_idx = st.selectbox(
+            "🔍 Haz clic en una zona del mapa o elígela aquí para ver dónde queda y abrir en Google Maps:"
+            if is_es else
+            "🔍 Click any zone on the map or pick one below to inspect locality & open in Google Maps:",
+            options=inspect_options,
+            format_func=lambda idx: (
+                ("— Vista general (todas las zonas) —" if is_es else "— Overview (all active zones) —")
+                if idx == -1 else
+                f"#{idx + 1} · {map_agg.loc[idx, 'localidad']} ({map_agg.loc[idx, value_col]:,.0f} {unit_label})"
+            )
+        )
+
+        # Auto-detectar resolución de malla
         unique_lats = np.sort(df['lat_bin'].unique())
         diffs = np.diff(unique_lats)
         diffs = diffs[diffs > 1e-5]
@@ -585,32 +697,50 @@ with col_map:
         geojson_grid = {"type": "FeatureCollection", "features": features}
 
         # Escala de color normalizada al máximo histórico de 26 años del territorio seleccionado
-        # (Cada región se compara contra su propio máximo 2000-2026; Todo Chile contra el máximo nacional)
         if month_idx_choice == 0:
             hist_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
         else:
             hist_cell_max = float(df_filtered[value_col].max())
         hist_cell_max = max(hist_cell_max, 1.0)
 
-        # Centrado exacto en los datos de la región seleccionada
-        if preset != "All Chile" and preset != "Custom Coordinates":
+        # Centrado y zoom (si eligió una localidad, permite acercarse directamente a ella)
+        zoom_to_selected = False
+        if selected_idx != -1:
+            zoom_to_selected = st.checkbox(
+                f"🔎 Acercar mapa a {map_agg.loc[selected_idx, 'localidad']}"
+                if is_es else
+                f"🔎 Zoom map into {map_agg.loc[selected_idx, 'localidad']}",
+                value=True
+            )
+
+        if selected_idx != -1 and zoom_to_selected:
+            center_lat = float(map_agg.loc[selected_idx, "lat_bin"])
+            center_lon = float(map_agg.loc[selected_idx, "lon_bin"])
+            zoom_lvl = 9.2
+        elif preset != "All Chile" and preset != "Custom Coordinates":
             center_lat = float((df_filtered['lat_bin'].min() + df_filtered['lat_bin'].max()) / 2.0)
             center_lon = float((df_filtered['lon_bin'].min() + df_filtered['lon_bin'].max()) / 2.0)
             span = max(
                 float(df_filtered['lat_bin'].max() - df_filtered['lat_bin'].min()) + grid_res,
                 float(df_filtered['lon_bin'].max() - df_filtered['lon_bin'].min()) + grid_res
             )
+            zoom_lvl = float(np.clip(8.3 - np.log2(max(span, 0.4)), 3.2, 8.2))
         else:
             center_lat = (lat_min + lat_max) / 2.0
             center_lon = (lon_min + lon_max) / 2.0
             span = max(abs(lat_max - lat_min), abs(lon_max - lon_min))
-
-        zoom_lvl = float(np.clip(8.3 - np.log2(max(span, 0.4)), 3.2, 8.2))
+            zoom_lvl = float(np.clip(8.3 - np.log2(max(span, 0.4)), 3.2, 8.2))
 
         choro_func = px.choropleth_map if hasattr(px, "choropleth_map") else px.choropleth_mapbox
-        style_kwarg = {"map_style": "carto-darkmatter"} if hasattr(px, "choropleth_map") else {"mapbox_style": "carto-darkmatter"}
+        style_kwarg = {"map_style": chosen_style} if hasattr(px, "choropleth_map") else {"mapbox_style": chosen_style}
 
-        hover_cols = {"cell_id": False, "lat_bin": ":.3f", "lon_bin": ":.3f", "harmonized_hotspots": ":,.0f"}
+        hover_cols = {
+            "cell_id": False,
+            "localidad": True,
+            "lat_bin": ":.3f",
+            "lon_bin": ":.3f",
+            "harmonized_hotspots": ":,.0f"
+        }
         if audience != "citizen":
             hover_cols["harmonized_frp"] = ":,.1f"
 
@@ -622,11 +752,12 @@ with col_map:
             color=value_col,
             color_continuous_scale="Cividis",
             range_color=[0, hist_cell_max],
-            opacity=0.68,
+            opacity=0.65,
             zoom=zoom_lvl,
             center={"lat": center_lat, "lon": center_lon},
             hover_data=hover_cols,
             labels={
+                "localidad": "Localidad cercana" if is_es else "Nearest locality",
                 "lat_bin": "Latitud" if is_es else "Latitude",
                 "lon_bin": "Longitud" if is_es else "Longitude",
                 "harmonized_hotspots": "Focos de calor" if is_es else "Calibrated Hotspots",
@@ -634,18 +765,56 @@ with col_map:
             },
             **style_kwarg
         )
-        fig_map.update_traces(marker_line_width=0.5, marker_line_color="rgba(255,255,255,0.22)")
+        fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(255,255,255,0.35)")
         fig_map.update_layout(height=480, margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_map, width='stretch')
+
+        # Captura clic directo en el mapa si la versión de Streamlit lo soporta
+        try:
+            chart_event = st.plotly_chart(fig_map, width='stretch', on_select="rerun", selection_mode="points", key="fire_map_chart")
+            if chart_event and getattr(chart_event, "selection", None) and chart_event.selection.get("points"):
+                pt = chart_event.selection["points"][0]
+                clicked_idx = pt.get("point_index", pt.get("pointIndex", None))
+                if clicked_idx is not None and 0 <= int(clicked_idx) < len(map_agg):
+                    selected_idx = int(clicked_idx)
+        except TypeError:
+            st.plotly_chart(fig_map, width='stretch')
+
+        # Tarjeta de detalle de la zona seleccionada con enlaces directos a Google Maps y NASA FIRMS
+        if selected_idx != -1:
+            sel_row = map_agg.loc[selected_idx]
+            s_lat, s_lon = float(sel_row["lat_bin"]), float(sel_row["lon_bin"])
+            gmaps_url = f"https://www.google.com/maps/search/?api=1&query={s_lat:.4f},{s_lon:.4f}"
+            firms_url = f"https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@{s_lon:.3f},{s_lat:.3f},11z"
+
+            if sel_row["zone_type"] == "industrial_desert":
+                origin_note = (
+                    "🏭 **Contexto de la fuente:** En el norte minero (ej. Calama / Antofagasta), los focos persistentes de calor suelen corresponder a **fundiciones de cobre, faenas industriales o plantas termosolares**, más que a incendios forestales."
+                    if is_es else
+                    "🏭 **Source context:** In northern mining zones (e.g., Calama / Antofagasta), persistent thermal anomalies typically correspond to **copper smelters, mining operations, or solar thermal plants** rather than forest wildfires."
+                )
+            else:
+                origin_note = (
+                    "🌲 **Contexto de la fuente:** En esta zona centro-sur, las anomalías térmicas corresponden principalmente a **incendios forestales, de pastizales o quemas agrícolas/silvícolas**."
+                    if is_es else
+                    "🌲 **Source context:** In central-southern Chile, thermal anomalies primarily reflect **forest/brush wildfires or agricultural/forestry burns**."
+                )
+
+            st.info(
+                f"📍 **Zona inspeccionada:** **{sel_row['localidad']}** (`{s_lat:.3f}°, {s_lon:.3f}°`) — "
+                f"**{sel_row['harmonized_hotspots']:,.0f}** {'focos calibrados' if is_es else 'calibrated hotspots'}\n\n"
+                f"{origin_note}\n\n"
+                f"🔗 [**Abrir punto exacto en Google Maps (Vista Satelital)**]({gmaps_url})  |  "
+                f"[**Ver en NASA FIRMS**]({firms_url})"
+            )
 
 with col_side:
     if audience == "citizen":
         st.subheader("📖 ¿Qué significa cada cosa?" if is_es else "📖 What Does Everything Mean?")
         if is_es:
             st.markdown(
-                "- **🔥 Foco de calor:** Un punto del terreno donde el satélite de la NASA detectó temperatura anormalmente alta (incendio forestal o quema).\n"
-                "- **📏 Lo normal (Mediana):** El nivel habitual de fuego en tu región durante los últimos 26 años. Sirve para saber si un año estuvo tranquilo o fuera de control.\n"
-                "- **🛰️ ¿Por qué es confiable?** Unimos satélites antiguos (2000–2011) con los modernos (2012–2026) corrigiendo sus diferencias de cámara para que la comparación sea justa."
+                "- **🔥 Foco de calor:** Un punto del terreno donde el satélite de la NASA detectó temperatura anormalmente alta (incendio forestal, quema o calor industrial).\n"
+                "- **📏 Lo normal (Mediana):** El nivel habitual de fuego en tu región durante los últimos 26 años.\n"
+                "- **🛰️ ¿Por qué es confiable?** Unimos satélites antiguos (2000–2011) con los modernos (2012–2026) corrigiendo sus diferencias de cámara para comparar en igualdad de condiciones."
             )
             st.success(
                 "💡 **¿Cómo ayudar en tu comunidad?**\n"
@@ -653,8 +822,8 @@ with col_side:
             )
         else:
             st.markdown(
-                "- **🔥 Fire hotspot:** A patch of land where NASA satellites detected abnormally high heat (wildfire or burn).\n"
-                "- **📏 Typical Year (Normal):** The usual fire level in your region over the past 26 years, used as a yardstick.\n"
+                "- **🔥 Fire hotspot:** A patch of land where NASA satellites detected abnormally high heat (wildfire, burn, or industrial heat).\n"
+                "- **📏 Typical Year (Normal):** The usual fire level in your region over the past 26 years.\n"
                 "- **🛰️ Why trust it?** We aligned older satellites (2000–2011) with modern ones (2012–2026) so historical comparisons are fair."
             )
             st.success(
