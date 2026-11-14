@@ -55,7 +55,7 @@ st.sidebar.caption(
     "- Grid: `0.25° × 0.25°`\n"
     "- Swath Geometry: `scan × track`\n"
     "- Orbital De-duplication: Active\n"
-    "- Colorblind-safe `Cividis` palette"
+    "- Fixed 26-year `Cividis` scale"
 )
 
 # Filtrar por coordenadas
@@ -93,13 +93,14 @@ full_grid = pd.MultiIndex.from_product([all_years, range(1, 13)], names=['year',
 monthly_raw = df_filtered.groupby(['year', 'month'])[value_col].sum().reset_index()
 monthly_totals = pd.merge(full_grid, monthly_raw, on=['year', 'month'], how='left').fillna(0)
 
-# KPIs dinámicos según si se eligió todo el año o un mes específico
+# KPIs dinámicos y referencia máxima histórica fija (evita re-escalado engañoso)
 if selected_month_label == "All Year (Annual)":
     annual_totals = monthly_totals.groupby('year')[value_col].sum()
     total_selected = annual_totals.loc[selected_year]
     median_baseline = annual_totals.median()
     period_title = f"{selected_year} (Full Year)"
     df_map_source = df_filtered[df_filtered['year'] == selected_year]
+    ref_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
 else:
     month_idx = month_names.index(selected_month_label) + 1
     month_series = monthly_totals[monthly_totals['month'] == month_idx].set_index('year')[value_col]
@@ -107,7 +108,9 @@ else:
     median_baseline = month_series.median()
     period_title = f"{selected_month_label} {selected_year}"
     df_map_source = df_filtered[(df_filtered['year'] == selected_year) & (df_filtered['month'] == month_idx)]
+    ref_cell_max = float(df_filtered[value_col].max())
 
+ref_cell_max = max(ref_cell_max, 1.0)
 anomaly_pct = ((total_selected - median_baseline) / median_baseline * 100) if median_baseline > 0 else 0
 
 kpi1, kpi2, kpi3 = st.columns(3)
@@ -117,7 +120,7 @@ kpi3.metric("Anomaly vs. Median", f"{anomaly_pct:+.1f}%", delta_color="inverse")
 
 st.markdown("---")
 
-# 5. Calendario de 26 Años + Curva Estacional Comparativa
+# 5. Calendario de 26 Años + Curva Estacional Comparativa (con eje Y fijo)
 col_cal, col_curve = st.columns([1.4, 1])
 
 with col_cal:
@@ -144,9 +147,9 @@ with col_curve:
         p75=lambda x: x.quantile(0.75)
     ).reset_index()
     year_curve = monthly_totals[monthly_totals['year'] == selected_year].sort_values('month')
+    max_monthly_all_time = max(float(monthly_totals[value_col].max()), 1.0)
 
     fig_curve = go.Figure()
-    # Banda intercuartil histórica (25% - 75%)
     fig_curve.add_trace(go.Scatter(
         x=month_names + month_names[::-1],
         y=list(stats_monthly['p75']) + list(stats_monthly['p25'])[::-1],
@@ -155,7 +158,6 @@ with col_curve:
         line=dict(color='rgba(255,255,255,0)'),
         name='Normal Range (25th–75th pct)'
     ))
-    # Mediana histórica
     fig_curve.add_trace(go.Scatter(
         x=month_names,
         y=stats_monthly['median'],
@@ -163,7 +165,6 @@ with col_curve:
         line=dict(color='#6495ED', dash='dash', width=2),
         name='26-Year Median'
     ))
-    # Año seleccionado
     fig_curve.add_trace(go.Scatter(
         x=month_names,
         y=year_curve[value_col],
@@ -175,14 +176,14 @@ with col_curve:
     fig_curve.update_layout(
         height=480,
         margin=dict(l=10, r=10, t=20, b=10),
-        yaxis_title=unit_label,
+        yaxis=dict(title=unit_label, range=[0, max_monthly_all_time * 1.05]),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_curve, width='stretch')
 
 st.markdown("---")
 
-# 6. Mapa Espacial de Intensidad y Descarga de Datos
+# 6. Mapa Espacial Normalizado a la Escala Histórica de 26 Años
 col_map, col_dl = st.columns([2.2, 1])
 
 with col_map:
@@ -198,6 +199,7 @@ with col_map:
         center_lat = map_agg['lat_bin'].mean()
         center_lon = map_agg['lon_bin'].mean()
         zoom_lvl = 4 if preset == "All Chile" else 6
+        max_bubble_px = 30.0
 
         map_func = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
         style_kwarg = {"map_style": "carto-darkmatter"} if hasattr(px, "scatter_map") else {"mapbox_style": "carto-darkmatter"}
@@ -209,7 +211,8 @@ with col_map:
             size=value_col,
             color=value_col,
             color_continuous_scale="Cividis",
-            size_max=28,
+            range_color=[0, ref_cell_max],
+            size_max=int(max_bubble_px),
             zoom=zoom_lvl,
             center={"lat": center_lat, "lon": center_lon},
             hover_data={
@@ -225,6 +228,13 @@ with col_map:
                 "harmonized_frp": "FRP (MW)"
             },
             **style_kwarg
+        )
+        # Ancla el área física de los círculos al máximo histórico de 26 años
+        fig_map.update_traces(
+            marker=dict(
+                sizeref=2.0 * ref_cell_max / (max_bubble_px ** 2),
+                sizemode='area'
+            )
         )
         fig_map.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_map, width='stretch')
