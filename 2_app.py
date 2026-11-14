@@ -200,6 +200,12 @@ def filter_by_polygon(df_in, poly):
         p1x, p1y = p2x, p2y
     return df_in[inside]
 
+def make_circle_coords(lat_c, lon_c, radius_km, num_pts=48):
+    angles = np.linspace(0, 2 * np.pi, num_pts)
+    dlat = (radius_km / 111.0) * np.cos(angles)
+    dlon = (radius_km / (111.0 * max(np.cos(np.radians(lat_c)), 0.1))) * np.sin(angles)
+    return list(lat_c + dlat), list(lon_c + dlon)
+
 # 6. Cabecera Accesible (Idioma + Daltonismo + Baja Visión / Texto Grande)
 head_title, head_lang, head_color, head_vision = st.columns([2.1, 0.9, 1.3, 1.1])
 
@@ -285,7 +291,7 @@ with head_title:
 
 if is_es:
     st.info(
-        "**¿Qué hace esta aplicación?** Unifica 26 años de observaciones satelitales de la NASA (2000–2026) corrigiendo las diferencias entre satélites antiguos y modernos para mostrar un historial confiable de focos de calor en todo Chile, junto con **temperatura, viento y calidad del aire**.\n\n"
+        "**¿Qué hace esta aplicación?** Unifica 26 años de observaciones satelitales de la NASA (2000–2026) corrigiendo las diferencias entre satélites antiguos y modernos para mostrar un historial confiable de focos de calor y **potencia térmica (FRP)** en todo Chile, junto con **temperatura, viento y calidad del aire**.\n\n"
         "**¿En qué ayuda?** Permite a vecinos, municipios e investigadores identificar **qué meses del año son más peligrosos**, **qué porcentaje de incendios ocurre en cada temporada** y **qué comunas o sectores concentran mayor recurrencia de fuego**."
     )
 else:
@@ -305,7 +311,7 @@ tutorial_steps = (
         ("2. Nivel de Detalle", "Elige *Ciudadanía* (simple y con audio), *Municipios* (QGIS) o *Investigadores*."),
         ("3. Año y Rango de Meses", "Usa el desplegable o flechas de año y elige un trimestre, semestre o rango de meses."),
         ("4. Revisa el Calendario", "Mira qué meses y años tuvieron mayor actividad y compara con lo normal."),
-        ("5. Mapa, Clima y Ayuda", "Haz clic en tu comuna para ver temperatura, aire, ranking y enviar correo a CONAF.")
+        ("5. Mapa Satelital y Clima", "Explora el mapa en vista satélite o calles, revisa temperatura, aire y contacta a CONAF.")
     ]
     if is_es else
     [
@@ -313,7 +319,7 @@ tutorial_steps = (
         ("2. Detail Level", "Select *Citizens* (plain language + audio), *Municipalities*, or *Researchers*."),
         ("3. Year & Month Range", "Use the year selector or arrows and pick a quarter, semester, or custom months."),
         ("4. Read Calendar", "Spot which months and years peaked and compare against historical baselines."),
-        ("5. Map, Weather & Action", "Click a commune to check temperature, air quality, rankings, and send alerts.")
+        ("5. Satellite Map & Weather", "Explore satellite/street layers, check weather & air quality, and send alerts.")
     ]
 )
 for col_t, (t_head, t_body) in zip(tut_cols, tutorial_steps):
@@ -386,27 +392,18 @@ else:
 
 opt_col1, opt_col2 = st.columns([1.6, 1.4])
 with opt_col1:
-    if audience == "citizen":
-        value_col = "harmonized_hotspots"
-        unit_label = "Focos de calor" if is_es else "Fire hotspots"
-        st.caption(
-            "Mostrando conteo calibrado de focos de calor satelitales."
-            if is_es else
-            "Showing calibrated satellite fire hotspot counts."
-        )
-    else:
-        metric_key = st.radio(
-            "Variable a visualizar:" if is_es else "Variable to visualize:",
-            ["hotspots", "frp"],
-            format_func=lambda k: (
-                ("Focos Calibrados (Conteo de detecciones)" if is_es else "Calibrated Hotspots (Count)")
-                if k == "hotspots" else
-                ("Potencia Radiativa del Fuego (FRP - MW)" if is_es else "Fire Radiative Power (FRP - MW)")
-            ),
-            horizontal=True
-        )
-        value_col = "harmonized_hotspots" if metric_key == "hotspots" else "harmonized_frp"
-        unit_label = ("Focos" if is_es else "Hotspots") if metric_key == "hotspots" else "MW"
+    metric_key = st.radio(
+        "Métrica principal:" if is_es else "Primary metric:",
+        ["hotspots", "frp"],
+        format_func=lambda k: (
+            ("Cantidad de Focos Calibrados" if is_es else "Calibrated Hotspot Count")
+            if k == "hotspots" else
+            ("Intensidad / Potencia Térmica (FRP - MW)" if is_es else "Fire Intensity / Radiative Power (FRP - MW)")
+        ),
+        horizontal=True
+    )
+    value_col = "harmonized_hotspots" if metric_key == "hotspots" else "harmonized_frp"
+    unit_label = ("Focos" if is_es else "Hotspots") if metric_key == "hotspots" else "MW"
 
 with opt_col2:
     exclude_industrial = st.checkbox(
@@ -456,7 +453,6 @@ month_full_names = (
 
 years_available = sorted([int(y) for y in df_filtered['year'].unique()])
 years_desc = list(reversed(years_available))
-default_year = 2023 if 2023 in years_available else years_available[-1]
 
 all_years = range(int(min(years_available)), int(max(years_available)) + 1)
 full_grid = pd.MultiIndex.from_product([all_years, range(1, 13)], names=['year', 'month']).to_frame().reset_index(drop=True)
@@ -475,31 +471,63 @@ top3_share = (top3_months.sum() / month_totals_hist.sum() * 100) if month_totals
 annual_totals = monthly_totals.groupby('year')[value_col].sum()
 complete_years = annual_totals[annual_totals.index < 2026]
 annual_median_baseline = complete_years.median() if not complete_years.empty else annual_totals.median()
+worst_yr = int(annual_totals.idxmax())
+
+# Si el usuario cambia de región, seleccionar automáticamente su peor año histórico (ej. 2024 en Valparaíso, 2023 en Biobío)
+if st.session_state.get("last_preset_tracker") != preset:
+    st.session_state["last_preset_tracker"] = preset
+    st.session_state["selected_year_state"] = worst_yr
+
+if "selected_year_state" not in st.session_state or st.session_state["selected_year_state"] not in years_available:
+    st.session_state["selected_year_state"] = worst_yr
+
+# Callbacks seguros para botones (evita StreamlitWidgetAlreadyInstantiatedError)
+def set_year_cb(new_yr):
+    st.session_state["selected_year_state"] = int(new_yr)
+
+def step_year_cb(delta):
+    cur = st.session_state.get("selected_year_state", worst_yr)
+    if cur in years_available:
+        idx = years_available.index(cur)
+        new_idx = int(np.clip(idx + delta, 0, len(years_available) - 1))
+        st.session_state["selected_year_state"] = years_available[new_idx]
 
 # 10. Paso 3: Selección Cómoda de Año (Desplegable + Flechas) y Rango de Meses
-if "selected_year_state" not in st.session_state or st.session_state["selected_year_state"] not in years_available:
-    st.session_state["selected_year_state"] = int(default_year)
-
 st.subheader("Paso 3 · Selecciona Año y Rango de Meses" if is_es else "Step 3 · Select Year & Month Range")
 
-# Atajos rápidos de año
 q1, q2, q3 = st.columns(3)
-if q1.button("Atajo: Año actual (2026)" if is_es else "Shortcut: Current year (2026)", width='stretch'):
-    st.session_state["selected_year_state"] = int(max(years_available))
-worst_yr = int(annual_totals.idxmax())
-if q2.button(f"Atajo: Peor año histórico ({worst_yr})" if is_es else f"Shortcut: Worst historical year ({worst_yr})", width='stretch'):
-    st.session_state["selected_year_state"] = worst_yr
-if q3.button("Atajo: Año tranquilo (2016)" if is_es else "Shortcut: Calm year (2016)", width='stretch'):
-    st.session_state["selected_year_state"] = 2016 if 2016 in years_available else int(min(years_available))
+q1.button(
+    "Atajo: Año actual (2026)" if is_es else "Shortcut: Current year (2026)",
+    on_click=set_year_cb,
+    args=(int(max(years_available)),),
+    width='stretch'
+)
+q2.button(
+    f"Atajo: Peor año en esta región ({worst_yr})" if is_es else f"Shortcut: Worst year in region ({worst_yr})",
+    on_click=set_year_cb,
+    args=(worst_yr,),
+    width='stretch'
+)
+calm_yr = 2016 if 2016 in years_available else int(min(years_available))
+q3.button(
+    f"Atajo: Año tranquilo ({calm_yr})" if is_es else f"Shortcut: Calm year ({calm_yr})",
+    on_click=set_year_cb,
+    args=(calm_yr,),
+    width='stretch'
+)
 
 yr_col1, yr_col2, yr_col3, period_mode_col = st.columns([0.7, 1.4, 0.7, 2.2])
 
 cur_yr_idx = years_available.index(st.session_state["selected_year_state"])
 with yr_col1:
     st.write("")
-    if st.button("◀ Anterior" if is_es else "◀ Prev", disabled=(cur_yr_idx == 0), width='stretch'):
-        st.session_state["selected_year_state"] = years_available[cur_yr_idx - 1]
-        st.rerun()
+    st.button(
+        "◀ Anterior" if is_es else "◀ Prev",
+        disabled=(cur_yr_idx == 0),
+        on_click=step_year_cb,
+        args=(-1,),
+        width='stretch'
+    )
 
 with yr_col2:
     selected_year = st.selectbox(
@@ -510,10 +538,13 @@ with yr_col2:
 
 with yr_col3:
     st.write("")
-    cur_yr_idx = years_available.index(st.session_state["selected_year_state"])
-    if st.button("Siguiente ▶" if is_es else "Next ▶", disabled=(cur_yr_idx == len(years_available) - 1), width='stretch'):
-        st.session_state["selected_year_state"] = years_available[cur_yr_idx + 1]
-        st.rerun()
+    st.button(
+        "Siguiente ▶" if is_es else "Next ▶",
+        disabled=(cur_yr_idx == len(years_available) - 1),
+        on_click=step_year_cb,
+        args=(1,),
+        width='stretch'
+    )
 
 with period_mode_col:
     period_preset = st.selectbox(
@@ -550,6 +581,7 @@ elif period_preset == "single_month":
     m_single = st.selectbox(
         "Elige el mes:" if is_es else "Choose month:",
         options=list(range(1, 13)),
+        index=1 if (preset == "Valparaíso" and selected_year == 2024) else 0,
         format_func=lambda m: month_full_names[m - 1]
     )
     m_start, m_end = m_single, m_single
@@ -624,7 +656,7 @@ df_map_source = df_filtered[
 
 region_display = preset_labels[preset]
 
-# 11. Diagnóstico Comparativo + Lectura en Voz Alta (Accesibilidad)
+# 11. Diagnóstico Comparativo + Contexto de Incendios Rápidos Urbano-Forestales
 if median_baseline > 0:
     ratio = total_selected / median_baseline
     pct_diff = (ratio - 1.0) * 100
@@ -642,8 +674,8 @@ if median_baseline > 0:
         if audience == "citizen":
             st.error(
                 f"**NIVEL CRÍTICO EXTREMO en {region_display} ({period_title}):** "
-                f"Se registraron **{ratio:.1f} veces más focos** que en un período normal.\n\n"
-                f"En esta región, el **{top3_share:.0f}%** de los incendios ocurre entre **{top3_names}**. "
+                f"Se registraron **{ratio:.1f} veces más {unit_label.lower()}** que en un período normal.\n\n"
+                f"En esta región, el **{top3_share:.0f}%** de la actividad ocurre entre **{top3_names}**. "
                 f"Es fundamental mantener cortafuegos limpios y evitar cualquier uso de fuego o chispas antes de esos meses."
                 if is_es else
                 f"**EXTREME CRITICAL LEVEL in {region_display} ({period_title}):** "
@@ -726,6 +758,14 @@ else:
             f"**NO FIRES DETECTED in {region_display} ({period_title}):** Normal behavior."
         )
 
+# Nota aclaratoria clave para megaincendios ultra-rápidos de interfaz urbano-forestal (ej. Valparaíso Feb 2024)
+if preset == "Valparaíso" and selected_year == 2024 and is_es:
+    st.caption(
+        "**Nota sobre el Megaincendio de Valparaíso (2–3 Feb 2024):** Este evento avanzó a velocidad extrema en menos de 48 horas sobre zonas urbanas densas (Viña del Mar, Quilpué y Villa Alemana). "
+        "Como los satélites pasan 2–4 veces al día y el área quemada (~10.000 ha) fue geográficamente más compacta que los megaincendios forestales rurales de Biobío/Maule (que arden durante semanas en >400.000 ha), "
+        "el número total de pasadas satelitales es menor, pero su **potencia radiativa (FRP)** y concentración urbana marcaron el máximo histórico regional de 26 años."
+    )
+
 # Botón accesible de lectura en voz alta (Web Speech API)
 safe_speech_text = json.dumps(diag_plain)
 speech_lang = "es-CL" if is_es else "en-US"
@@ -752,11 +792,17 @@ components.html(
     height=46
 )
 
-# 12. Indicadores Numéricos (KPIs con Porcentaje del Rango)
+# 12. Indicadores Numéricos (KPIs con Porcentaje del Rango y Potencia FRP)
+frp_selected = float(
+    df_filtered[(df_filtered['year'] == selected_year) & (df_filtered['month'].isin(effective_months))]['harmonized_frp'].sum()
+)
+
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric(
-    f"{'Focos en' if (is_es and audience == 'citizen') else ('Actividad en' if is_es else 'Activity in')} {period_title}",
-    f"{total_selected:,.0f} {unit_label}"
+    f"{'Focos en' if (is_es and metric_key == 'hotspots') else ('Potencia en' if is_es else 'Activity in')} {period_title}",
+    f"{total_selected:,.0f} {unit_label}",
+    delta=(f"Potencia térmica: {frp_selected:,.0f} MW" if (metric_key == "hotspots" and is_es) else None),
+    delta_color="off"
 )
 kpi2.metric(median_label, f"{median_baseline:,.0f} {unit_label}")
 kpi3.metric(
@@ -789,13 +835,13 @@ if audience == "citizen":
     st.markdown(
         (
             "**Cómo leer este cuadro:** Cada **fila horizontal** es un año y cada **columna vertical** es un mes. "
-            "Cada **cuadrícula (rectángulo)** representa la cantidad total de focos de calor detectados en esa región durante **ese mes y año exacto**.\n\n"
+            "Cada **cuadrícula (rectángulo)** representa la actividad total detectada en esa región durante **ese mes y año exacto**.\n\n"
             f"**Guía de colores:** {color_guide_text}"
         )
         if is_es else
         (
             "**How to read this grid:** Each **row** is a year and each **column** is a month. "
-            "Each **cell (rectangle)** represents the total fire hotspots detected in this region during **that exact month and year**.\n\n"
+            "Each **cell (rectangle)** represents the total fire activity detected in this region during **that exact month and year**.\n\n"
             f"**Color guide:** {color_guide_text}"
         )
     )
@@ -973,7 +1019,7 @@ CHILE_LOCALITIES = [
     ("La Ligua / Petorca / Cabildo", -32.45, -71.23, "forest_agri"),
     ("San Felipe / Los Andes", -32.75, -70.72, "forest_agri"),
     ("Quillota / La Calera / Limache", -32.88, -71.25, "forest_agri"),
-    ("Valparaíso / Viña del Mar / Quilpué", -33.05, -71.55, "forest_agri"),
+    ("Viña del Mar / Quilpué / Villa Alemana / Valparaíso", -33.04, -71.48, "forest_agri"),
     ("Casablanca", -33.32, -71.41, "forest_agri"),
     ("San Antonio / Cartagena / Algarrobo", -33.59, -71.61, "forest_agri"),
     ("Colina / Lampa / Tiltil", -33.20, -70.68, "forest_agri"),
@@ -1072,9 +1118,9 @@ diffs = diffs[diffs > 1e-5]
 native_res = float(np.min(diffs)) if len(diffs) > 0 else 0.05
 
 st.subheader(
-    f"Paso 5 · Ubicación Exacta, Clima Diario y Calidad del Aire — {period_title}"
+    f"Paso 5 · Mapa Interactivo (Satélite / Calles), Clima y Calidad del Aire — {period_title}"
     if is_es else
-    f"Step 5 · Exact Location, Daily Weather & Air Quality — {period_title}"
+    f"Step 5 · Interactive Map (Satellite / Streets), Weather & Air Quality — {period_title}"
 )
 
 col_map, col_side = st.columns([2.2, 1])
@@ -1084,61 +1130,75 @@ active_lon_for_weather = float((df_filtered['lon_exact'].min() + df_filtered['lo
 active_place_for_weather = region_display
 
 with col_map:
-    if df_map_source.empty:
+    # Controles interactivos superiores del mapa
+    m_ctrl1, m_ctrl2, m_ctrl3, m_ctrl4 = st.columns([1.15, 1.15, 1.15, 1.15])
+    with m_ctrl1:
+        map_scope_mode = st.radio(
+            "Datos en mapa:" if is_es else "Map scope:",
+            ["selected", "all_26y"],
+            format_func=lambda k: (
+                ("Período elegido" if is_es else "Selected period")
+                if k == "selected" else
+                ("Acumulado 26 años" if is_es else "26-Yr Cumulative")
+            ),
+            horizontal=True
+        )
+    with m_ctrl2:
+        viz_mode = st.radio(
+            "Estilo visual:" if is_es else "Visual layer:",
+            ["bubbles", "heatmap", "grid"],
+            format_func=lambda k: {
+                "bubbles": "Círculos" if is_es else "Circles",
+                "heatmap": "Nube calor" if is_es else "Heat cloud",
+                "grid": "Cuadrícula" if is_es else "Grid",
+            }[k],
+            horizontal=True
+        )
+    with m_ctrl3:
+        res_mode = st.radio(
+            "Detalle espacial:" if is_es else "Spatial grid:",
+            ["fine", "commune", "macro"],
+            format_func=lambda k: {
+                "fine": f"Máx (~{native_res * 111:.1f} km)" if is_es else f"Max (~{native_res * 111:.1f} km)",
+                "commune": "Comunal (~11 km)" if is_es else "Commune (~11 km)",
+                "macro": "Regional (~22 km)" if is_es else "Regional (~22 km)",
+            }[k],
+            horizontal=True
+        )
+    with m_ctrl4:
+        map_style_choice = st.radio(
+            "Mapa base:" if is_es else "Basemap:",
+            ["satellite", "osm", "dark"],
+            format_func=lambda k: {
+                "satellite": "Satélite" if is_es else "Satellite",
+                "osm": "Calles" if is_es else "Streets",
+                "dark": "Oscuro" if is_es else "Dark",
+            }[k],
+            horizontal=True
+        )
+
+    df_active_map_df = df_map_source if map_scope_mode == "selected" else df_filtered
+    map_scope_label = period_title if map_scope_mode == "selected" else ("2000–2026 (Acumulado)" if is_es else "2000–2026 (Cumulative)")
+
+    if df_active_map_df.empty:
         st.info(
-            "No se registraron focos de calor en este período para la zona elegida."
+            "No se registraron focos de calor en este período para la zona elegida. Cambia 'Datos en mapa' a 'Acumulado 26 años' para ver el historial completo."
             if is_es else
-            "No fire hotspots recorded in this period for the selected area."
+            "No fire hotspots recorded in this period. Switch 'Map scope' to '26-Yr Cumulative' to inspect full history."
         )
         map_agg = pd.DataFrame()
         selected_idx = -1
         exact_zone_display = ""
         exact_comuna_name = ""
     else:
-        m_ctrl1, m_ctrl2, m_ctrl3 = st.columns([1.3, 1.2, 0.9])
-        with m_ctrl1:
-            viz_mode = st.radio(
-                "Cómo ver los datos:" if is_es else "Map style:",
-                ["bubbles", "heatmap", "grid"],
-                format_func=lambda k: {
-                    "bubbles": "Círculos" if is_es else "Circles",
-                    "heatmap": "Nube de calor" if is_es else "Heat cloud",
-                    "grid": "Cuadrícula" if is_es else "Grid cells",
-                }[k],
-                horizontal=True
-            )
-        with m_ctrl2:
-            res_mode = st.radio(
-                "Resolución espacial:" if is_es else "Spatial resolution:",
-                ["fine", "commune", "macro"],
-                format_func=lambda k: {
-                    "fine": f"Máxima (~{native_res * 111:.1f} km)" if is_es else f"Max (~{native_res * 111:.1f} km)",
-                    "commune": "Comunal (~11 km)" if is_es else "Commune (~11 km)",
-                    "macro": "Regional (~22 km)" if is_es else "Regional (~22 km)",
-                }[k],
-                horizontal=True
-            )
-        with m_ctrl3:
-            map_style_choice = st.radio(
-                "Fondo:" if is_es else "Basemap:",
-                ["osm", "dark"],
-                format_func=lambda k: (
-                    ("Calles" if is_es else "Streets")
-                    if k == "osm" else
-                    ("Oscuro" if is_es else "Dark")
-                ),
-                horizontal=True
-            )
-
         res_step_map = {
             "fine": native_res,
             "commune": max(native_res, 0.10),
             "macro": max(native_res, 0.20),
         }
         active_grid_res = res_step_map[res_mode]
-        chosen_style = "open-street-map" if map_style_choice == "osm" else "carto-darkmatter"
 
-        df_map_work = df_map_source.copy()
+        df_map_work = df_active_map_df.copy()
         w = df_map_work[value_col].clip(lower=1e-6)
         df_map_work["_w_lat"] = df_map_work["lat_exact"] * w
         df_map_work["_w_lon"] = df_map_work["lon_exact"] * w
@@ -1168,57 +1228,55 @@ with col_map:
         map_agg = map_agg[map_agg[value_col] > 0].sort_values(by=value_col, ascending=False).reset_index(drop=True)
         map_agg["cell_id"] = map_agg.index.astype(str)
 
+        total_map_val = max(float(map_agg[value_col].sum()), 1e-6)
+        map_agg["pct_share"] = (map_agg[value_col] / total_map_val) * 100.0
+
         loc_info = [describe_location_local(float(r["lat_plot"]), float(r["lon_plot"]), is_es) for _, r in map_agg.iterrows()]
         map_agg["localidad"] = [x[0] for x in loc_info]
         map_agg["zone_type"] = [x[1] for x in loc_info]
         map_agg["comuna_ref"] = [x[2] for x in loc_info]
 
-        top_n = min(len(map_agg), 30)
+        top_n = min(len(map_agg), 35)
         inspect_options = [-1] + list(range(top_n))
         selected_idx = st.selectbox(
-            "Inspeccionar comuna / sector específico (actualiza mapa, temperatura y calidad del aire):"
+            f"Enfocar comuna / sector en el mapa ({map_scope_label}) — o haz clic directo en cualquier punto:"
             if is_es else
-            "Inspect specific commune / sector (updates map, temperature & air quality):",
+            f"Focus commune / sector on map ({map_scope_label}) — or click any point directly:",
             options=inspect_options,
             format_func=lambda idx: (
                 ("— Vista general de toda la región —" if is_es else "— Full region overview —")
                 if idx == -1 else
-                f"#{idx + 1} · {map_agg.loc[idx, 'localidad']} ({map_agg.loc[idx, value_col]:,.0f} {unit_label})"
+                f"#{idx + 1} · {map_agg.loc[idx, 'localidad']} ({map_agg.loc[idx, value_col]:,.0f} {unit_label} · {map_agg.loc[idx, 'pct_share']:.1f}%)"
             )
         )
 
-        df_hist_res = df_filtered.copy()
-        if res_mode == "fine":
-            df_hist_res["_g_lat"] = df_hist_res["lat_bin"]
-            df_hist_res["_g_lon"] = df_hist_res["lon_bin"]
-        else:
-            df_hist_res["_g_lat"] = (np.floor(df_hist_res["lat_exact"] / active_grid_res) + 0.5) * active_grid_res
-            df_hist_res["_g_lon"] = (np.floor(df_hist_res["lon_exact"] / active_grid_res) + 0.5) * active_grid_res
-
-        if is_full_year:
-            hist_cell_max = float(df_hist_res.groupby(['year', '_g_lat', '_g_lon'])[value_col].sum().max())
-        else:
-            hist_cell_max = float(
-                df_hist_res[df_hist_res['month'].isin(selected_months)]
-                .groupby(['year', '_g_lat', '_g_lon'])[value_col]
-                .sum()
-                .max()
-            )
-        hist_cell_max = max(hist_cell_max, 1.0)
+        # Escala de color calibrada al percentil 95 para que los focos críticos resalten con contraste real
+        color_max_val = float(np.percentile(map_agg[value_col], 95)) if len(map_agg) > 3 else float(map_agg[value_col].max())
+        color_max_val = max(color_max_val, 1.0)
 
         zoom_to_selected = False
+        show_buffer_rings = False
         if selected_idx != -1:
-            zoom_to_selected = st.checkbox(
-                f"Acercar al detalle de caminos y predios en {map_agg.loc[selected_idx, 'localidad']}"
-                if is_es else
-                f"Zoom into roads & terrain at {map_agg.loc[selected_idx, 'localidad']}",
-                value=True
-            )
+            z_c1, z_c2 = st.columns(2)
+            with z_c1:
+                zoom_to_selected = st.checkbox(
+                    f"Acercar vista detallada en {map_agg.loc[selected_idx, 'localidad']}"
+                    if is_es else
+                    f"Zoom in on {map_agg.loc[selected_idx, 'localidad']}",
+                    value=True
+                )
+            with z_c2:
+                show_buffer_rings = st.checkbox(
+                    "Mostrar anillos preventivos (5 km y 10 km)"
+                    if is_es else
+                    "Show preventive radius rings (5 km & 10 km)",
+                    value=True
+                )
 
         if selected_idx != -1 and zoom_to_selected:
             center_lat = float(map_agg.loc[selected_idx, "lat_plot"])
             center_lon = float(map_agg.loc[selected_idx, "lon_plot"])
-            zoom_lvl = 11.6
+            zoom_lvl = 11.8
         elif preset != "All Chile" and preset != "Custom Coordinates":
             center_lat = float((df_filtered['lat_exact'].min() + df_filtered['lat_exact'].max()) / 2.0)
             center_lon = float((df_filtered['lon_exact'].min() + df_filtered['lon_exact'].max()) / 2.0)
@@ -1237,32 +1295,35 @@ with col_map:
             "localidad": True,
             "lat_plot": ":.4f",
             "lon_plot": ":.4f",
-            "harmonized_hotspots": ":,.0f"
+            "harmonized_hotspots": ":,.0f",
+            "harmonized_frp": ":,.1f",
+            "pct_share": ":.1f"
         }
-        if audience != "citizen":
-            hover_cols["harmonized_frp"] = ":,.1f"
 
         labels_map = {
             "localidad": "Zona / Comuna" if is_es else "Zone / Commune",
             "lat_plot": "Latitud" if is_es else "Latitude",
             "lon_plot": "Longitud" if is_es else "Longitude",
             "harmonized_hotspots": "Focos de calor" if is_es else "Calibrated Hotspots",
-            "harmonized_frp": "FRP (MW)"
+            "harmonized_frp": "Potencia FRP (MW)" if is_es else "FRP Power (MW)",
+            "pct_share": "% del período" if is_es else "% of period"
         }
+
+        base_style_name = "carto-darkmatter" if map_style_choice == "dark" else "open-street-map"
 
         if viz_mode == "bubbles":
             scatter_func = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
-            style_kwarg = {"map_style": chosen_style} if hasattr(px, "scatter_map") else {"mapbox_style": chosen_style}
+            style_kwarg = {"map_style": base_style_name} if hasattr(px, "scatter_map") else {"mapbox_style": base_style_name}
             fig_map = scatter_func(
                 map_agg,
                 lat="lat_plot",
                 lon="lon_plot",
                 size=value_col,
                 color=value_col,
-                size_max=26,
+                size_max=30,
                 color_continuous_scale=color_scale,
-                range_color=[0, hist_cell_max],
-                opacity=0.85,
+                range_color=[0, color_max_val],
+                opacity=0.88,
                 zoom=zoom_lvl,
                 center={"lat": center_lat, "lon": center_lon},
                 hover_name="localidad",
@@ -1272,16 +1333,16 @@ with col_map:
             )
         elif viz_mode == "heatmap":
             density_func = px.density_map if hasattr(px, "density_map") else px.density_mapbox
-            style_kwarg = {"map_style": chosen_style} if hasattr(px, "density_map") else {"mapbox_style": chosen_style}
+            style_kwarg = {"map_style": base_style_name} if hasattr(px, "density_map") else {"mapbox_style": base_style_name}
             fig_map = density_func(
                 map_agg,
                 lat="lat_plot",
                 lon="lon_plot",
                 z=value_col,
-                radius=26,
+                radius=28,
                 color_continuous_scale=color_scale,
-                range_color=[0, hist_cell_max],
-                opacity=0.78,
+                range_color=[0, color_max_val],
+                opacity=0.80,
                 zoom=zoom_lvl,
                 center={"lat": center_lat, "lon": center_lon},
                 hover_name="localidad",
@@ -1309,7 +1370,7 @@ with col_map:
                 })
             geojson_grid = {"type": "FeatureCollection", "features": features}
             choro_func = px.choropleth_map if hasattr(px, "choropleth_map") else px.choropleth_mapbox
-            style_kwarg = {"map_style": chosen_style} if hasattr(px, "choropleth_map") else {"mapbox_style": chosen_style}
+            style_kwarg = {"map_style": base_style_name} if hasattr(px, "choropleth_map") else {"mapbox_style": base_style_name}
             hover_grid = dict(hover_cols)
             hover_grid["cell_id"] = False
             fig_map = choro_func(
@@ -1319,25 +1380,78 @@ with col_map:
                 featureidkey="id",
                 color=value_col,
                 color_continuous_scale=color_scale,
-                range_color=[0, hist_cell_max],
-                opacity=0.62,
+                range_color=[0, color_max_val],
+                opacity=0.68,
                 zoom=zoom_lvl,
                 center={"lat": center_lat, "lon": center_lon},
                 hover_data=hover_grid,
                 labels=labels_map,
                 **style_kwarg
             )
-            fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(120,120,120,0.45)")
+            fig_map.update_traces(marker_line_width=0.7, marker_line_color="rgba(255,255,255,0.45)")
 
-        fig_map.update_layout(height=470, margin=dict(l=0, r=0, t=10, b=0))
+        # Capa Satelital Real (Esri World Imagery + etiquetas de caminos/ciudades)
+        if map_style_choice == "satellite":
+            sat_layers = [
+                {
+                    "below": "traces",
+                    "sourcetype": "raster",
+                    "sourceattribution": "Esri World Imagery",
+                    "source": [
+                        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    ],
+                },
+                {
+                    "below": "traces",
+                    "sourcetype": "raster",
+                    "source": [
+                        "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+                    ],
+                },
+            ]
+            if hasattr(px, "scatter_map"):
+                fig_map.update_layout(map_layers=sat_layers)
+            else:
+                fig_map.update_layout(mapbox_layers=sat_layers)
+
+        # Anillos de radio preventivo (5 km y 10 km) alrededor del sector seleccionado
+        if selected_idx != -1 and show_buffer_rings:
+            s_lat_ring = float(map_agg.loc[selected_idx, "lat_plot"])
+            s_lon_ring = float(map_agg.loc[selected_idx, "lon_plot"])
+            lat_5, lon_5 = make_circle_coords(s_lat_ring, s_lon_ring, 5.0)
+            lat_10, lon_10 = make_circle_coords(s_lat_ring, s_lon_ring, 10.0)
+            trace_cls = go.Scattermap if hasattr(go, "Scattermap") else go.Scattermapbox
+            fig_map.add_trace(trace_cls(
+                lat=lat_5,
+                lon=lon_5,
+                mode="lines",
+                line=dict(width=2.5, color="#00E5FF"),
+                name="Radio 5 km" if is_es else "5 km Radius",
+                hoverinfo="skip"
+            ))
+            fig_map.add_trace(trace_cls(
+                lat=lat_10,
+                lon=lon_10,
+                mode="lines",
+                line=dict(width=1.8, color="#FFD600"),
+                name="Radio 10 km" if is_es else "10 km Radius",
+                hoverinfo="skip"
+            ))
+
+        fig_map.update_layout(
+            height=520,
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(20,20,20,0.65)", font=dict(color="white"))
+        )
 
         try:
             chart_event = st.plotly_chart(fig_map, width='stretch', on_select="rerun", selection_mode="points", key="fire_map_chart")
             if chart_event and getattr(chart_event, "selection", None) and chart_event.selection.get("points"):
                 pt = chart_event.selection["points"][0]
-                clicked_idx = pt.get("point_index", pt.get("pointIndex", None))
-                if clicked_idx is not None and 0 <= int(clicked_idx) < len(map_agg):
-                    selected_idx = int(clicked_idx)
+                if pt.get("curve_number", 0) == 0:
+                    clicked_idx = pt.get("point_index", pt.get("pointIndex", None))
+                    if clicked_idx is not None and 0 <= int(clicked_idx) < len(map_agg):
+                        selected_idx = int(clicked_idx)
         except TypeError:
             st.plotly_chart(fig_map, width='stretch')
 
@@ -1365,14 +1479,15 @@ with col_map:
                 )
             else:
                 origin_note = (
-                    "**Origen probable:** En esta zona centro-sur, las detecciones reflejan principalmente **incendios forestales, de pastizales o quemas agrícolas**."
+                    "**Origen probable:** En esta zona centro-sur, las detecciones reflejan principalmente **incendios forestales, de pastizales, interfaz urbano-forestal o quemas agrícolas**."
                     if is_es else
-                    "**Probable source:** In central-southern Chile, detections primarily reflect **forest/brush wildfires or agricultural burns**."
+                    "**Probable source:** In central-southern Chile, detections primarily reflect **forest/brush wildfires, urban-wildland interface fires, or agricultural burns**."
                 )
 
             st.info(
                 f"**Ubicación exacta:** **{exact_zone_display}** (`{s_lat:.4f}°, {s_lon:.4f}°`) — "
-                f"**{sel_row['harmonized_hotspots']:,.0f}** {'focos calibrados' if is_es else 'calibrated hotspots'}\n\n"
+                f"**{sel_row['harmonized_hotspots']:,.0f}** {'focos calibrados' if is_es else 'calibrated hotspots'} "
+                f"(**{sel_row['harmonized_frp']:,.0f} MW** {'potencia radiativa' if is_es else 'radiative power'})\n\n"
                 f"{origin_note}\n\n"
                 f"[Abrir en Google Maps]({gmaps_url})  |  "
                 f"[Focos activos 24h NASA FIRMS]({firms_url})  |  "
@@ -1495,35 +1610,36 @@ with col_map:
                     st.plotly_chart(fig_fc, width='stretch')
 
         # Ranking Top 10 Sectores / Comunas más afectados en el período
-        top_rank_df = (
-            map_agg.groupby("localidad", as_index=False)[value_col]
-            .sum()
-            .sort_values(by=value_col, ascending=False)
-            .head(10)
-            .sort_values(by=value_col, ascending=True)
-        )
-        if not top_rank_df.empty:
-            st.markdown(
-                f"**Top {len(top_rank_df)} {'sectores más afectados en' if is_es else 'most affected sectors in'} {period_title}:**"
+        if not map_agg.empty:
+            top_rank_df = (
+                map_agg.groupby("localidad", as_index=False)[value_col]
+                .sum()
+                .sort_values(by=value_col, ascending=False)
+                .head(10)
+                .sort_values(by=value_col, ascending=True)
             )
-            fig_rank = px.bar(
-                top_rank_df,
-                x=value_col,
-                y="localidad",
-                orientation="h",
-                color=value_col,
-                color_continuous_scale=color_scale,
-                labels={"localidad": "", value_col: unit_label}
-            )
-            fig_rank.update_layout(
-                height=max(220, len(top_rank_df) * 32),
-                margin=dict(l=10, r=10, t=5, b=10),
-                font=dict(size=chart_font_size),
-                coloraxis_showscale=False,
-                yaxis=dict(title=""),
-                xaxis=dict(title=unit_label)
-            )
-            st.plotly_chart(fig_rank, width='stretch')
+            if not top_rank_df.empty:
+                st.markdown(
+                    f"**Top {len(top_rank_df)} {'sectores más afectados en' if is_es else 'most affected sectors in'} {map_scope_label}:**"
+                )
+                fig_rank = px.bar(
+                    top_rank_df,
+                    x=value_col,
+                    y="localidad",
+                    orientation="h",
+                    color=value_col,
+                    color_continuous_scale=color_scale,
+                    labels={"localidad": "", value_col: unit_label}
+                )
+                fig_rank.update_layout(
+                    height=max(220, len(top_rank_df) * 32),
+                    margin=dict(l=10, r=10, t=5, b=10),
+                    font=dict(size=chart_font_size),
+                    coloraxis_showscale=False,
+                    yaxis=dict(title=""),
+                    xaxis=dict(title=unit_label)
+                )
+                st.plotly_chart(fig_rank, width='stretch')
 
 with col_side:
     if audience == "citizen":
@@ -1531,7 +1647,7 @@ with col_side:
         if is_es:
             st.error("**Emergencias activas:** Si ves humo o fuego ahora mismo, llama gratis al **130 (CONAF)** o **132 (Bomberos)**.")
 
-            if not df_map_source.empty and not map_agg.empty:
+            if not map_agg.empty:
                 if selected_idx != -1 and exact_zone_display:
                     active_sector = exact_zone_display
                     muni_target = f"de la Municipalidad de {exact_comuna_name}" if exact_comuna_name else "de la Municipalidad"
@@ -1578,7 +1694,7 @@ with col_side:
             msg_muni = (
                 f"Estimado equipo de Emergencias {muni_target}:\n"
                 f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({scope_label}) "
-                f"concentra el {mail_share:.0f}% de los focos de calor históricos entre {mail_months}. "
+                f"concentra el {mail_share:.0f}% de la actividad histórica de incendios entre {mail_months}. "
                 f"Solicitamos informar el calendario de limpieza de maleza y mantención de cortafuegos preventivos para nuestro sector."
             )
             st.text_area("Mensaje listo para copiar:", value=msg_muni, height=160)
@@ -1709,28 +1825,25 @@ with tab_how:
 
 with tab_faq:
     if is_es:
+        with st.expander("¿Por qué el megaincendio de Valparaíso (Febrero 2024) tiene menos focos totales que Biobío 2023?"):
+            st.write(
+                "Los satélites polares pasan 2 a 4 veces al día. El incendio de Viña del Mar / Quilpué (2–3 de febrero de 2024) fue extremadamente violento y rápido (duró ~36 horas en un área urbana de ~10.000 hectáreas), "
+                "mientras que los megaincendios rurales de Biobío o Maule ardieron durante semanas cubriendo más de 400.000 hectáreas de plantaciones forestales. "
+                "Si cambias la métrica a 'Intensidad / Potencia Térmica (FRP)' o miras Febrero 2024 en Valparaíso, verás que marcó el máximo histórico de la región."
+            )
         with st.expander("¿Por qué aparecen focos en el desierto del norte (ej. Calama o Antofagasta)?"):
             st.write(
                 "Los satélites NASA FIRMS miden anomalías térmicas en superficie sin distinguir su origen. "
                 "En el norte de Chile, esas detecciones persistentes corresponden a fundiciones de cobre (como Chuquicamata), faenas mineras o plantas termosolares, no a incendios forestales."
             )
-        with st.expander("¿Qué precisión espacial tiene cada círculo en el mapa?"):
-            st.write(
-                "Los satélites modernos VIIRS ubican el calor con una precisión de 375 metros. "
-                "En esta plataforma, cada círculo se posiciona en el centroide ponderado de las detecciones y consulta los límites administrativos para indicar la comuna y sector exacto."
-            )
         with st.expander("¿De dónde provienen la temperatura, el viento y la calidad del aire?"):
             st.write(
                 "Se consultan en tiempo real desde Open-Meteo (modelos meteorológicos globales y de composición atmosférica Copernicus) para las coordenadas exactas de la región o comuna seleccionada."
             )
-        with st.expander("¿Esta plataforma reemplaza las alertas de emergencia en tiempo real?"):
-            st.write(
-                "No. Esta herramienta está diseñada para prevención, análisis histórico y planificación territorial. Ante humo o fuego activo hoy, llama al 130 (CONAF) o 132 (Bomberos)."
-            )
     else:
+        with st.expander("Why does Valparaíso Feb 2024 have fewer total hotspot detections than Biobío 2023?"):
+            st.write(
+                "Polar-orbiting satellites pass 2–4 times per day. The Feb 2–3, 2024 Valparaíso megafire burned ~10,000 ha of dense urban-wildland interface in under 48 hours, whereas rural forestry megafires in Biobío/Maule burned >400,000 ha over several weeks."
+            )
         with st.expander("Why do hotspots appear in the northern desert (e.g., Calama)?"):
             st.write("NASA FIRMS detects surface thermal anomalies including copper smelters, mining operations, and solar plants.")
-        with st.expander("How accurate is each circle on the map?"):
-            st.write("Modern VIIRS sensors locate heat at 375 m resolution. Each circle is positioned at the fire-weighted centroid and reverse-geocoded to identify the exact commune and local sector.")
-        with st.expander("Where do temperature, wind, and air quality data come from?"):
-            st.write("Fetched dynamically from Open-Meteo (global weather and Copernicus atmospheric models) for the selected region or commune coordinates.")
