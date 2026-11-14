@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from urllib.parse import quote
 
 # 1. Configuración general de la página
 st.set_page_config(page_title="FIRMS Fire Calendar", layout="wide")
@@ -84,7 +85,7 @@ def filter_by_polygon(df_in, poly):
         p1x, p1y = p2x, p2y
     return df_in[inside]
 
-# 4. Cabecera Minimalista: Título + Idioma + Accesibilidad Visual (Estándar vs. Daltonismo)
+# 4. Cabecera Minimalista + Contexto Claro de Qué Hace la App y En Qué Ayuda
 head_title, head_lang, head_color = st.columns([2.4, 1.1, 1.5])
 
 with head_lang:
@@ -125,10 +126,16 @@ with head_title:
         if is_es else
         "Harmonized Wildfire Activity Calendar"
     )
-    st.caption(
-        "Serie histórica calibrada NASA FIRMS (2000–2026) · Guía paso a paso"
-        if is_es else
-        "Calibrated NASA FIRMS historical record (2000–2026) · Step-by-step guide"
+
+if is_es:
+    st.info(
+        "**¿Qué hace esta aplicación?** Unifica 26 años de observaciones satelitales de la NASA (2000–2026) corrigiendo las diferencias entre satélites antiguos y modernos para mostrar un historial confiable de focos de calor en todo Chile.\n\n"
+        "**¿En qué ayuda?** Permite a vecinos, municipios e investigadores identificar **qué meses del año son más peligrosos** y **qué sectores concentran mayor recurrencia de fuego**, facilitando la limpieza preventiva de cortafuegos y la toma de decisiones antes de cada temporada."
+    )
+else:
+    st.info(
+        "**What does this app do?** It unifies 26 years of NASA satellite fire observations (2000–2026), calibrating older and newer sensors into a single consistent record across Chile.\n\n"
+        "**How does it help?** It helps residents, municipalities, and researchers identify **which months carry the highest fire risk** and **which sectors experience recurring fires**, supporting preventive firebreak maintenance and early planning."
     )
 
 st.markdown("---")
@@ -585,6 +592,8 @@ CHILE_LOCALITIES = [
     ("Coronel / Lota / Santa Juana", -37.03, -73.14, "forest_agri"),
     ("Cabrero / Yumbel", -37.04, -72.40, "forest_agri"),
     ("Los Ángeles / Nacimiento", -37.47, -72.35, "forest_agri"),
+    ("Mulchén / Quilaco", -37.72, -72.24, "forest_agri"),
+    ("Santa Bárbara / Alto Biobío", -37.67, -71.82, "forest_agri"),
     ("Lebu / Cañete (Arauco)", -37.60, -73.65, "forest_agri"),
     ("Angol / Collipulli", -37.80, -72.71, "forest_agri"),
     ("Victoria / Traiguén", -38.23, -72.33, "forest_agri"),
@@ -894,21 +903,47 @@ with col_side:
         st.subheader("Consulta a tu Municipio y Ayuda" if is_es else "Contact Municipality & Help")
         if is_es:
             st.error("**Emergencias activas:** Si ves humo o fuego ahora mismo, llama gratis al **130 (CONAF)** o **132 (Bomberos)**.")
+
+            active_sector = (
+                map_agg.loc[selected_idx, "localidad"]
+                if (not df_map_source.empty and not map_agg.empty and selected_idx != -1)
+                else (map_agg.loc[0, "localidad"] if (not df_map_source.empty and not map_agg.empty) else region_display)
+            )
+
             st.markdown(
                 f"**Solicitud preventiva para tu comuna ({region_display}):**\n"
-                f"Copia este texto y envíalo a la oficina de emergencias de tu municipalidad antes de **{top3_names}**:"
+                f"Copia este texto y envíalo antes de **{top3_names}** a tu municipalidad o a las instituciones de prevención:"
             )
-            sample_sector = map_agg.loc[0, "localidad"] if (not df_map_source.empty and not map_agg.empty) else region_display
             msg_muni = (
                 f"Estimado equipo de Emergencias de la Municipalidad:\n"
-                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} - {sample_sector}) "
+                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} - {active_sector}) "
                 f"concentra el {top3_share:.0f}% de los incendios entre {top3_names}. "
                 f"Solicitamos informar el calendario de limpieza de maleza y mantención de cortafuegos preventivos para nuestro sector."
             )
-            st.text_area("Texto listo para copiar:", value=msg_muni, height=155)
+            st.text_area("Mensaje listo para copiar:", value=msg_muni, height=155)
+
+            mailto_subject = quote(f"Solicitud preventiva de cortafuegos - {active_sector} ({region_display})")
+            mailto_body = quote(msg_muni)
+            mailto_link = f"mailto:consulta.oirs@conaf.cl,oirs@senapred.gob.cl?subject={mailto_subject}&body={mailto_body}"
+
+            st.markdown(f"[Abrir correo listo para enviar (CONAF / SENAPRED)]({mailto_link})")
+
+            st.markdown(
+                "**Correos de instituciones de ayuda y prevención:**\n"
+                "* **CONAF (Prevención de Incendios - OIRS):** `consulta.oirs@conaf.cl` (Fono: `130`)\n"
+                "* **SENAPRED (Gestión de Riesgos y Emergencias):** `oirs@senapred.gob.cl`\n"
+                "* **Red de Prevención Comunitaria (Interfaz Urbano-Forestal):** `contacto@reddeprevencioncomunitaria.cl`\n"
+                "* **Tu Municipalidad:** Busca la ventanilla **OIRS** o **Emergencias** en el sitio web de tu comuna y pega este mismo mensaje."
+            )
         else:
             st.error("**Active emergencies:** If you see smoke or fire right now, call **130 (CONAF)** or **132 (Firefighters)**.")
-            st.info(f"In **{region_display}**, **{top3_names}** concentrate **{top3_share:.0f}%** of annual fire activity. Ask your local municipality about preventive firebreaks ahead of this window.")
+            st.info(
+                f"In **{region_display}**, **{top3_names}** concentrate **{top3_share:.0f}%** of annual fire activity.\n\n"
+                "**Institutional contacts:**\n"
+                "- **CONAF (National Forestry Corp.):** `consulta.oirs@conaf.cl` (Phone: `130`)\n"
+                "- **SENAPRED (National Disaster Prevention):** `oirs@senapred.gob.cl`\n"
+                "- **Local Municipality:** Contact your local Emergency / OIRS desk ahead of this critical window."
+            )
 
     elif audience == "municipal":
         st.subheader("Exportar Reporte Territorial" if is_es else "Export Territorial Report")
