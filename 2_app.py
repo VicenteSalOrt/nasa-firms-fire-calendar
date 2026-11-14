@@ -542,7 +542,7 @@ else:
     st.markdown("---")
     st.subheader(f"🗺️ Mapa Espacial de Intensidad — {period_title}" if is_es else f"🗺️ Spatial Fire Intensity Map — {period_title}")
 
-# 11. Mapa Espacial de Extensión Real (Polígonos de Celdas para todos los incendios)
+# 11. Mapa Espacial de Extensión Real (Normalizado por Región / País)
 col_map, col_side = st.columns([2.2, 1])
 
 with col_map:
@@ -584,7 +584,13 @@ with col_map:
             })
         geojson_grid = {"type": "FeatureCollection", "features": features}
 
-        period_max = max(float(map_agg[value_col].max()), 1.0)
+        # Escala de color normalizada al máximo histórico de 26 años del territorio seleccionado
+        # (Cada región se compara contra su propio máximo 2000-2026; Todo Chile contra el máximo nacional)
+        if month_idx_choice == 0:
+            hist_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
+        else:
+            hist_cell_max = float(df_filtered[value_col].max())
+        hist_cell_max = max(hist_cell_max, 1.0)
 
         # Centrado exacto en los datos de la región seleccionada
         if preset != "All Chile" and preset != "Custom Coordinates":
@@ -615,7 +621,7 @@ with col_map:
             featureidkey="id",
             color=value_col,
             color_continuous_scale="Cividis",
-            range_color=[0, period_max],
+            range_color=[0, hist_cell_max],
             opacity=0.68,
             zoom=zoom_lvl,
             center={"lat": center_lat, "lon": center_lon},
