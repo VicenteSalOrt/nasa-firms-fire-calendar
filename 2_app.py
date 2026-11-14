@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import urllib.request
+import json
 from urllib.parse import quote
 
 # 1. Configuración general de la página
@@ -11,11 +13,64 @@ st.set_page_config(page_title="FIRMS Fire Calendar", layout="wide")
 # 2. Cargar dataset calibrado (contiene todo Chile: 16 regiones)
 @st.cache_data
 def load_data():
-    return pd.read_csv("harmonized_chile.csv")
+    df_loaded = pd.read_csv("harmonized_chile.csv")
+    # Si el CSV incluye centroides exactos (lat_exact, lon_exact), usarlos; si no, usar lat_bin/lon_bin
+    if "lat_exact" not in df_loaded.columns:
+        df_loaded["lat_exact"] = df_loaded["lat_bin"]
+    if "lon_exact" not in df_loaded.columns:
+        df_loaded["lon_exact"] = df_loaded["lon_bin"]
+    return df_loaded
 
 df = load_data()
 
-# 3. Límites y Polígonos Exactos de las 16 Regiones de Chile
+# 3. Geocodificación Inversa Exacta (Comuna, Sector, Parque o Camino) vía OpenStreetMap
+@st.cache_data(show_spinner=False)
+def reverse_geocode_exact(lat_round, lon_round, is_es_flag=True):
+    url = (
+        f"https://nominatim.openstreetmap.org/reverse?format=jsonv2"
+        f"&lat={lat_round}&lon={lon_round}&zoom=13&addressdetails=1"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "ChileWildfireCalendar-NASA-App/1.0"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            addr = data.get("address", {})
+            sector = (
+                addr.get("hamlet")
+                or addr.get("village")
+                or addr.get("suburb")
+                or addr.get("neighbourhood")
+                or addr.get("locality")
+                or addr.get("nature_reserve")
+                or addr.get("park")
+                or addr.get("road")
+                or ""
+            )
+            comuna = (
+                addr.get("town")
+                or addr.get("city")
+                or addr.get("municipality")
+                or addr.get("county")
+                or ""
+            )
+            region = addr.get("state", "")
+            parts = []
+            if sector and sector.lower() != comuna.lower():
+                parts.append(f"Sector {sector}" if is_es_flag else f"{sector} area")
+            if comuna:
+                parts.append(f"Comuna de {comuna}" if is_es_flag else f"{comuna} Commune")
+            if not parts and region:
+                parts.append(region)
+            if parts:
+                return ", ".join(parts), comuna
+    except Exception:
+        pass
+    return None, ""
+
+# 4. Límites y Polígonos Exactos de las 16 Regiones de Chile
 REGIONS_BOUNDS = {
     "All Chile": (-56.0, -17.0, -76.0, -66.0),
     "Arica y Parinacota": (-19.25, -17.50, -70.50, -68.75),
@@ -66,8 +121,8 @@ REGION_POLYGONS = {
 }
 
 def filter_by_polygon(df_in, poly):
-    lons = df_in['lon_bin'].to_numpy()
-    lats = df_in['lat_bin'].to_numpy()
+    lons = df_in['lon_exact'].to_numpy()
+    lats = df_in['lat_exact'].to_numpy()
     inside = np.zeros(len(df_in), dtype=bool)
     n = len(poly)
     p1x, p1y = poly[0]
@@ -85,7 +140,7 @@ def filter_by_polygon(df_in, poly):
         p1x, p1y = p2x, p2y
     return df_in[inside]
 
-# 4. Cabecera Minimalista + Contexto Claro de Qué Hace la App y En Qué Ayuda
+# 5. Cabecera Minimalista + Contexto Claro
 head_title, head_lang, head_color = st.columns([2.4, 1.1, 1.5])
 
 with head_lang:
@@ -130,17 +185,17 @@ with head_title:
 if is_es:
     st.info(
         "**¿Qué hace esta aplicación?** Unifica 26 años de observaciones satelitales de la NASA (2000–2026) corrigiendo las diferencias entre satélites antiguos y modernos para mostrar un historial confiable de focos de calor en todo Chile.\n\n"
-        "**¿En qué ayuda?** Permite a vecinos, municipios e investigadores identificar **qué meses del año son más peligrosos** y **qué sectores concentran mayor recurrencia de fuego**, facilitando la limpieza preventiva de cortafuegos y la toma de decisiones antes de cada temporada."
+        "**¿En qué ayuda?** Permite a vecinos, municipios e investigadores identificar **qué meses del año son más peligrosos** y **qué comunas o sectores concentran mayor recurrencia de fuego**, facilitando la limpieza preventiva de cortafuegos antes de cada temporada."
     )
 else:
     st.info(
         "**What does this app do?** It unifies 26 years of NASA satellite fire observations (2000–2026), calibrating older and newer sensors into a single consistent record across Chile.\n\n"
-        "**How does it help?** It helps residents, municipalities, and researchers identify **which months carry the highest fire risk** and **which sectors experience recurring fires**, supporting preventive firebreak maintenance and early planning."
+        "**How does it help?** It helps residents, municipalities, and researchers identify **which months carry the highest fire risk** and **which communes and sectors experience recurring fires**, supporting preventive firebreak maintenance."
     )
 
 st.markdown("---")
 
-# 5. Guía Paso a Paso en Pantalla Principal
+# 6. Guía Paso a Paso en Pantalla Principal
 preset_keys = list(REGIONS_BOUNDS.keys()) + ["Custom Coordinates"]
 preset_labels = {
     "All Chile": "Todo Chile (País Completo)" if is_es else "All Chile (Full Country)",
@@ -211,10 +266,10 @@ else:
     value_col = "harmonized_hotspots" if metric_key == "hotspots" else "harmonized_frp"
     unit_label = ("Focos" if is_es else "Hotspots") if metric_key == "hotspots" else "MW"
 
-# 6. Filtrado Espacial (Caja + Polígono Regional Exacto)
+# 7. Filtrado Espacial (Caja + Polígono Regional Exacto)
 df_filtered = df[
-    (df['lat_bin'].between(lat_min, lat_max)) &
-    (df['lon_bin'].between(lon_min, lon_max))
+    (df['lat_exact'].between(lat_min, lat_max)) &
+    (df['lon_exact'].between(lon_min, lon_max))
 ]
 if preset in REGION_POLYGONS:
     df_filtered = filter_by_polygon(df_filtered, REGION_POLYGONS[preset])
@@ -255,7 +310,7 @@ annual_totals = monthly_totals.groupby('year')[value_col].sum()
 complete_years = annual_totals[annual_totals.index < 2026]
 annual_median_baseline = complete_years.median() if not complete_years.empty else annual_totals.median()
 
-# Paso 3: Selección de año y mes (con atajos de 1 clic en perfil ciudadano)
+# Paso 3: Selección de año y mes
 if "selected_year_state" not in st.session_state:
     st.session_state["selected_year_state"] = int(default_year)
 
@@ -312,7 +367,7 @@ else:
 
 region_display = preset_labels[preset]
 
-# 7. Diagnóstico Comparativo (Semáforo Sobrio)
+# 8. Diagnóstico Comparativo (Semáforo Sobrio)
 if median_baseline > 0:
     ratio = total_selected / median_baseline
     pct_diff = (ratio - 1.0) * 100
@@ -333,7 +388,7 @@ if median_baseline > 0:
             st.error(
                 f"**ANOMALÍA EXTREMA en {region_display} ({period_title}):** "
                 f"**{pct_diff:+.1f}%** sobre la mediana histórica (**{ratio:.1f}x** lo habitual). "
-                f"El **{top3_share:.0f}%** de la carga anual ocurre en **{top3_names}**; priorizar cortafuegos en los sectores destacados del mapa."
+                f"El **{top3_share:.0f}%** de la carga anual ocurre en **{top3_names}**; priorizar cortafuegos en las comunas destacadas del mapa."
                 if is_es else
                 f"**EXTREME ANOMALY in {region_display} ({period_title}):** "
                 f"**{pct_diff:+.1f}%** above historical median (**{ratio:.1f}x** baseline). **{top3_share:.0f}%** concentrates in **{top3_names}**."
@@ -388,7 +443,7 @@ else:
             f"**NO FIRES DETECTED in {region_display} ({period_title}):** Normal behavior."
         )
 
-# 8. Indicadores Numéricos (KPIs)
+# 9. Indicadores Numéricos (KPIs)
 kpi1, kpi2, kpi3 = st.columns(3)
 kpi1.metric(
     f"{'Focos detectados en' if (is_es and audience == 'citizen') else ('Actividad en' if is_es else 'Activity in')} {period_title}",
@@ -404,7 +459,7 @@ kpi3.metric(
 
 st.markdown("---")
 
-# 9. Calendario Histórico + Explicación Explícita de Cada Cuadrícula
+# 10. Calendario Histórico
 calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=value_col).reindex(columns=range(1, 13))
 max_monthly_all_time = max(float(monthly_totals[value_col].max()), 1.0)
 
@@ -440,13 +495,9 @@ else:
     with col_cal:
         st.subheader("Calendario de Actividad (26 Años)" if is_es else "26-Year Burning Activity Calendar")
         st.caption(
-            (
-                f"Cada cuadrícula representa 1 mes de 1 año en {region_display}. {color_guide_text}"
-            )
+            f"Cada cuadrícula representa 1 mes de 1 año en {region_display}. {color_guide_text}"
             if is_es else
-            (
-                f"Each cell represents 1 month of 1 year in {region_display}. {color_guide_text}"
-            )
+            f"Each cell represents 1 month of 1 year in {region_display}. {color_guide_text}"
         )
         fig_cal = px.imshow(
             calendar_pivot,
@@ -556,62 +607,96 @@ else:
 
 st.markdown("---")
 
-# 10. Mapa Espacial Interactivo con Selector de Visualización (Círculos / Calor / Cuadrícula)
+# 11. Catálogo Denso de Comunas, Localidades y Parques de Chile (Respaldo Instantáneo)
 CHILE_LOCALITIES = [
     ("Arica", -18.48, -70.31, "urban"),
-    ("Iquique", -20.21, -70.15, "urban"),
+    ("Putre", -18.20, -69.56, "semi_arid"),
+    ("Iquique / Alto Hospicio", -20.24, -70.12, "urban"),
+    ("Pozo Almonte / Pica", -20.26, -69.78, "desert"),
     ("Calama / Chuquicamata", -22.46, -68.93, "industrial_desert"),
     ("San Pedro de Atacama", -22.91, -68.20, "desert"),
     ("Antofagasta", -23.65, -70.40, "industrial_desert"),
+    ("Taltal", -25.41, -70.48, "industrial_desert"),
+    ("Chañaral / Diego de Almagro", -26.35, -70.62, "industrial_desert"),
     ("Copiapó / Tierra Amarilla", -27.37, -70.33, "industrial_desert"),
-    ("Vallenar", -28.58, -70.76, "semi_arid"),
+    ("Vallenar / Alto del Carmen", -28.58, -70.76, "semi_arid"),
     ("La Serena / Coquimbo", -29.90, -71.25, "semi_arid"),
-    ("Ovalle", -30.60, -71.20, "semi_arid"),
-    ("Illapel", -31.63, -71.17, "semi_arid"),
-    ("La Ligua / Petorca", -32.45, -71.23, "forest_agri"),
-    ("Quillota / Limache", -32.88, -71.25, "forest_agri"),
-    ("Valparaíso / Viña del Mar", -33.05, -71.62, "forest_agri"),
-    ("San Antonio", -33.59, -71.61, "forest_agri"),
-    ("Santiago (RM)", -33.45, -70.67, "forest_agri"),
-    ("Melipilla", -33.69, -71.21, "forest_agri"),
-    ("Rancagua / Machalí", -34.17, -70.74, "forest_agri"),
-    ("San Fernando", -34.58, -70.99, "forest_agri"),
-    ("Pichilemu", -34.39, -72.00, "forest_agri"),
-    ("Curicó", -34.98, -71.24, "forest_agri"),
-    ("Talca", -35.43, -71.66, "forest_agri"),
-    ("Constitución", -35.33, -72.41, "forest_agri"),
-    ("Linares", -35.85, -71.59, "forest_agri"),
-    ("Cauquenes", -35.97, -72.32, "forest_agri"),
-    ("Parral", -36.14, -71.83, "forest_agri"),
-    ("San Carlos", -36.42, -71.96, "forest_agri"),
-    ("Coelemu / Quirihue", -36.49, -72.70, "forest_agri"),
-    ("Chillán / Coihueco", -36.61, -72.10, "forest_agri"),
+    ("Vicuña / Paihuano", -30.03, -70.71, "semi_arid"),
+    ("Ovalle / Monte Patria", -30.60, -71.20, "semi_arid"),
+    ("Illapel / Salamanca", -31.63, -71.17, "semi_arid"),
+    ("La Ligua / Petorca / Cabildo", -32.45, -71.23, "forest_agri"),
+    ("San Felipe / Los Andes", -32.75, -70.72, "forest_agri"),
+    ("Quillota / La Calera / Limache", -32.88, -71.25, "forest_agri"),
+    ("Valparaíso / Viña del Mar / Quilpué", -33.05, -71.55, "forest_agri"),
+    ("Casablanca", -33.32, -71.41, "forest_agri"),
+    ("San Antonio / Cartagena / Algarrobo", -33.59, -71.61, "forest_agri"),
+    ("Colina / Lampa / Tiltil", -33.20, -70.68, "forest_agri"),
+    ("Santiago / Puente Alto / Maipú", -33.48, -70.65, "forest_agri"),
+    ("San José de Maipo", -33.64, -70.35, "forest_agri"),
+    ("Melipilla / Curacaví / María Pinto", -33.69, -71.21, "forest_agri"),
+    ("Talagante / Peñaflor / Paine", -33.66, -70.93, "forest_agri"),
+    ("Rancagua / Machalí / Graneros", -34.17, -70.74, "forest_agri"),
+    ("Rengo / San Vicente / Peumo", -34.41, -70.86, "forest_agri"),
+    ("San Fernando / Chimbarongo", -34.58, -70.99, "forest_agri"),
+    ("Santa Cruz / Peralillo / Marchigüe", -34.64, -71.36, "forest_agri"),
+    ("Pichilemu / Litueche / Navidad", -34.39, -72.00, "forest_agri"),
+    ("Curicó / Teno / Romeral / Molina", -34.98, -71.24, "forest_agri"),
+    ("Hualañé / Licantén / Vichuquén", -34.98, -71.81, "forest_agri"),
+    ("Talca / San Clemente / Maule", -35.43, -71.66, "forest_agri"),
+    ("Constitución / Empedrado / Curepto", -35.33, -72.41, "forest_agri"),
+    ("San Javier / Villa Alegre", -35.59, -71.74, "forest_agri"),
+    ("Linares / Colbún / Yerbas Buenas", -35.85, -71.59, "forest_agri"),
+    ("Longaví / Retiro / Parral", -36.14, -71.83, "forest_agri"),
+    ("Cauquenes / Chanco / Pelluhue", -35.97, -72.32, "forest_agri"),
+    ("San Carlos / Ñiquén / San Fabián", -36.42, -71.96, "forest_agri"),
+    ("Coelemu / Quirihue / Ninhue / Trehuaco", -36.49, -72.70, "forest_agri"),
+    ("Portezuelo / Ránquil / Nicolás", -36.53, -72.43, "forest_agri"),
+    ("Chillán / Chillán Viejo / Coihueco", -36.61, -72.10, "forest_agri"),
+    ("Pinto / San Ignacio / El Carmen", -36.70, -71.89, "forest_agri"),
     ("Quillón / Bulnes", -36.74, -72.47, "forest_agri"),
-    ("Yungay / Pemuco", -37.12, -72.01, "forest_agri"),
-    ("Penco / Tomé / Concepción", -36.74, -72.99, "forest_agri"),
+    ("Yungay / Pemuco / Tucapel", -37.12, -72.01, "forest_agri"),
+    ("Tomé / Penco / Concepción / Talcahuano", -36.74, -72.99, "forest_agri"),
+    ("Florida / Hualqui", -36.82, -72.66, "forest_agri"),
     ("Coronel / Lota / Santa Juana", -37.03, -73.14, "forest_agri"),
-    ("Cabrero / Yumbel", -37.04, -72.40, "forest_agri"),
-    ("Los Ángeles / Nacimiento", -37.47, -72.35, "forest_agri"),
+    ("Cabrero / Yumbel / Laja / San Rosendo", -37.04, -72.40, "forest_agri"),
+    ("Los Ángeles / Nacimiento / Negrete", -37.47, -72.35, "forest_agri"),
+    ("Quilleco / Antuco", -37.47, -71.96, "forest_agri"),
     ("Mulchén / Quilaco", -37.72, -72.24, "forest_agri"),
     ("Santa Bárbara / Alto Biobío", -37.67, -71.82, "forest_agri"),
-    ("Lebu / Cañete (Arauco)", -37.60, -73.65, "forest_agri"),
-    ("Angol / Collipulli", -37.80, -72.71, "forest_agri"),
-    ("Victoria / Traiguén", -38.23, -72.33, "forest_agri"),
-    ("Temuco / Padre Las Casas", -38.74, -72.59, "forest_agri"),
-    ("Villarrica / Pucón", -39.28, -72.23, "forest_agri"),
-    ("Valdivia / Mariquina", -39.81, -73.25, "forest_agri"),
-    ("La Unión / Río Bueno", -40.29, -73.08, "forest_agri"),
-    ("Osorno", -40.57, -73.13, "forest_agri"),
-    ("Puerto Montt / Puerto Varas", -41.47, -72.94, "forest_agri"),
-    ("Castro / Ancud (Chiloé)", -42.48, -73.76, "forest_agri"),
-    ("Chaitén / Futaleufú", -42.92, -72.71, "forest_agri"),
+    ("Arauco / Curanilahue / Los Álamos", -37.47, -73.35, "forest_agri"),
+    ("Lebu / Cañete / Contulmo / Tirúa", -37.80, -73.40, "forest_agri"),
+    ("Angol / Renaico / Collipulli", -37.80, -72.71, "forest_agri"),
+    ("Los Sauces / Purén / Lumaco", -37.98, -72.83, "forest_agri"),
+    ("Victoria / Traiguén / Ercilla", -38.23, -72.33, "forest_agri"),
+    ("Curacautín / Lonquimay", -38.44, -71.89, "forest_agri"),
+    ("Galvarino / Perquenco / Lautaro", -38.41, -72.78, "forest_agri"),
+    ("Nueva Imperial / Carahue / Cholchol", -38.74, -72.95, "forest_agri"),
+    ("Temuco / Padre Las Casas / Vilcún", -38.74, -72.59, "forest_agri"),
+    ("Freire / Pitrufquén / Gorbea", -38.95, -72.63, "forest_agri"),
+    ("Cunco / Melipeuco", -38.93, -72.03, "forest_agri"),
+    ("Villarrica / Pucón / Curarrehue", -39.28, -72.23, "forest_agri"),
+    ("Loncoche / Lanco / Panguipulli", -39.46, -72.63, "forest_agri"),
+    ("Valdivia / Mariquina / Máfil / Corral", -39.81, -73.25, "forest_agri"),
+    ("Los Lagos / Paillaco / Futrono", -39.86, -72.82, "forest_agri"),
+    ("La Unión / Río Bueno / Lago Ranco", -40.29, -73.08, "forest_agri"),
+    ("Osorno / San Pablo / Río Negro", -40.57, -73.13, "forest_agri"),
+    ("Purranque / Puerto Octay / Puyehue", -40.91, -73.16, "forest_agri"),
+    ("Frutillar / Llanquihue / Puerto Varas", -41.25, -73.01, "forest_agri"),
+    ("Puerto Montt / Calbuco / Maullín", -41.47, -72.94, "forest_agri"),
+    ("Cochamó / Hualaihué", -41.50, -72.30, "forest_agri"),
+    ("Ancud / Quemchi / Dalcahue (Chiloé)", -41.87, -73.83, "forest_agri"),
+    ("Castro / Chonchi / Quellón (Chiloé)", -42.48, -73.76, "forest_agri"),
+    ("Chaitén / Futaleufú / Palena", -42.92, -72.71, "forest_agri"),
+    ("Cisnes / Lago Verde", -44.75, -72.70, "forest_agri"),
     ("Coyhaique / Puerto Aysén", -45.57, -72.07, "forest_agri"),
-    ("Cochrane", -47.25, -72.57, "forest_agri"),
-    ("Puerto Natales", -51.73, -72.50, "forest_agri"),
-    ("Punta Arenas", -53.16, -70.91, "forest_agri"),
+    ("Río Ibáñez / Chile Chico", -46.54, -71.72, "forest_agri"),
+    ("Cochrane / Tortel / O'Higgins", -47.25, -72.57, "forest_agri"),
+    ("Puerto Natales / Torres del Paine", -51.73, -72.50, "forest_agri"),
+    ("Punta Arenas / Laguna Blanca", -53.16, -70.91, "forest_agri"),
+    ("Porvenir / Primavera (Tierra del Fuego)", -53.30, -70.37, "forest_agri"),
 ]
 
-def describe_location(lat, lon, is_es_flag=True):
+def describe_location_local(lat, lon, is_es_flag=True):
     best_name, best_dist, best_type = "", 1e9, "forest_agri"
     best_dlat, best_dlon = 0.0, 0.0
     for name, l_lat, l_lon, l_type in CHILE_LOCALITIES:
@@ -623,8 +708,8 @@ def describe_location(lat, lon, is_es_flag=True):
             best_name = name
             best_type = l_type
             best_dlat, best_dlon = dlat, dlon
-    if best_dist < 14.0:
-        loc_str = f"Sector {best_name}" if is_es_flag else f"{best_name} area"
+    if best_dist < 10.0:
+        loc_str = f"Comuna / Sector {best_name}" if is_es_flag else f"{best_name} commune/area"
     else:
         ns = "N" if best_dlat >= 0 else "S"
         ew = ("E" if best_dlon >= 0 else ("O" if is_es_flag else "W"))
@@ -633,7 +718,7 @@ def describe_location(lat, lon, is_es_flag=True):
             if is_es_flag else
             f"~{best_dist:.0f} km {ns}{ew} of {best_name}"
         )
-    return loc_str, best_type
+    return loc_str, best_type, best_name
 
 unique_lats = np.sort(df['lat_bin'].unique())
 diffs = np.diff(unique_lats)
@@ -642,9 +727,9 @@ grid_res = float(np.min(diffs)) if len(diffs) > 0 else 0.25
 cell_km = grid_res * 111.0
 
 st.subheader(
-    f"Paso 5 · Distribución Geográfica en el Territorio — {period_title}"
+    f"Paso 5 · Ubicación Exacta en el Territorio — {period_title}"
     if is_es else
-    f"Step 5 · Geographic Distribution Across Terrain — {period_title}"
+    f"Step 5 · Exact Geographic Distribution — {period_title}"
 )
 
 col_map, col_side = st.columns([2.2, 1])
@@ -683,9 +768,9 @@ with col_map:
 
         if viz_mode == "bubbles":
             st.caption(
-                "Cada círculo indica el centro donde se concentraron focos de calor; mientras más grande e intenso el círculo, mayor cantidad de fuego hubo en ese sector."
+                "Cada círculo marca el foco de concentración térmica; selecciona un punto para identificar la comuna exacta, el sector rural y acercar el mapa."
                 if is_es else
-                "Each circle marks the center of detected fire hotspots; larger and brighter circles indicate higher fire concentration."
+                "Each circle marks the center of thermal concentration; select any point to identify the exact commune, rural sector, and zoom in."
             )
         elif viz_mode == "heatmap":
             st.caption(
@@ -702,26 +787,40 @@ with col_map:
 
         chosen_style = "open-street-map" if map_style_choice == "osm" else "carto-darkmatter"
 
+        # Agrupar ponderando por intensidad para obtener el centroide real más preciso posible
+        df_map_work = df_map_source.copy()
+        w = df_map_work[value_col].clip(lower=1e-6)
+        df_map_work["_w_lat"] = df_map_work["lat_exact"] * w
+        df_map_work["_w_lon"] = df_map_work["lon_exact"] * w
+        df_map_work["_w"] = w
+
         map_agg = (
-            df_map_source.groupby(['lat_bin', 'lon_bin'])
+            df_map_work.groupby(['lat_bin', 'lon_bin'])
             .agg(
                 harmonized_hotspots=('harmonized_hotspots', 'sum'),
-                harmonized_frp=('harmonized_frp', 'sum')
+                harmonized_frp=('harmonized_frp', 'sum'),
+                _w_lat=('_w_lat', 'sum'),
+                _w_lon=('_w_lon', 'sum'),
+                _w=('_w', 'sum'),
             )
             .reset_index()
         )
+        map_agg["lat_plot"] = map_agg["_w_lat"] / map_agg["_w"]
+        map_agg["lon_plot"] = map_agg["_w_lon"] / map_agg["_w"]
         map_agg = map_agg[map_agg[value_col] > 0].sort_values(by=value_col, ascending=False).reset_index(drop=True)
         map_agg["cell_id"] = map_agg.index.astype(str)
-        loc_info = [describe_location(float(r["lat_bin"]), float(r["lon_bin"]), is_es) for _, r in map_agg.iterrows()]
+
+        loc_info = [describe_location_local(float(r["lat_plot"]), float(r["lon_plot"]), is_es) for _, r in map_agg.iterrows()]
         map_agg["localidad"] = [x[0] for x in loc_info]
         map_agg["zone_type"] = [x[1] for x in loc_info]
+        map_agg["comuna_ref"] = [x[2] for x in loc_info]
 
         top_n = min(len(map_agg), 30)
         inspect_options = [-1] + list(range(top_n))
         selected_idx = st.selectbox(
-            "Inspeccionar sector específico (o hacer clic sobre un punto del mapa):"
+            "Inspeccionar comuna / sector específico (o hacer clic sobre un punto del mapa):"
             if is_es else
-            "Inspect specific sector (or click a point on the map):",
+            "Inspect specific commune / sector (or click a point on the map):",
             options=inspect_options,
             format_func=lambda idx: (
                 ("— Vista general de toda la región —" if is_es else "— Full region overview —")
@@ -739,22 +838,22 @@ with col_map:
         zoom_to_selected = False
         if selected_idx != -1:
             zoom_to_selected = st.checkbox(
-                f"Acercar mapa a {map_agg.loc[selected_idx, 'localidad']}"
+                f"Acercar al detalle de caminos y predios en {map_agg.loc[selected_idx, 'localidad']}"
                 if is_es else
-                f"Zoom map into {map_agg.loc[selected_idx, 'localidad']}",
+                f"Zoom into roads & terrain at {map_agg.loc[selected_idx, 'localidad']}",
                 value=True
             )
 
         if selected_idx != -1 and zoom_to_selected:
-            center_lat = float(map_agg.loc[selected_idx, "lat_bin"])
-            center_lon = float(map_agg.loc[selected_idx, "lon_bin"])
-            zoom_lvl = 9.4
+            center_lat = float(map_agg.loc[selected_idx, "lat_plot"])
+            center_lon = float(map_agg.loc[selected_idx, "lon_plot"])
+            zoom_lvl = 11.4
         elif preset != "All Chile" and preset != "Custom Coordinates":
-            center_lat = float((df_filtered['lat_bin'].min() + df_filtered['lat_bin'].max()) / 2.0)
-            center_lon = float((df_filtered['lon_bin'].min() + df_filtered['lon_bin'].max()) / 2.0)
+            center_lat = float((df_filtered['lat_exact'].min() + df_filtered['lat_exact'].max()) / 2.0)
+            center_lon = float((df_filtered['lon_exact'].min() + df_filtered['lon_exact'].max()) / 2.0)
             span = max(
-                float(df_filtered['lat_bin'].max() - df_filtered['lat_bin'].min()) + grid_res,
-                float(df_filtered['lon_bin'].max() - df_filtered['lon_bin'].min()) + grid_res
+                float(df_filtered['lat_exact'].max() - df_filtered['lat_exact'].min()) + grid_res,
+                float(df_filtered['lon_exact'].max() - df_filtered['lon_exact'].min()) + grid_res
             )
             zoom_lvl = float(np.clip(8.3 - np.log2(max(span, 0.4)), 3.2, 8.2))
         else:
@@ -765,17 +864,17 @@ with col_map:
 
         hover_cols = {
             "localidad": True,
-            "lat_bin": ":.3f",
-            "lon_bin": ":.3f",
+            "lat_plot": ":.4f",
+            "lon_plot": ":.4f",
             "harmonized_hotspots": ":,.0f"
         }
         if audience != "citizen":
             hover_cols["harmonized_frp"] = ":,.1f"
 
         labels_map = {
-            "localidad": "Localidad cercana" if is_es else "Nearest locality",
-            "lat_bin": "Latitud" if is_es else "Latitude",
-            "lon_bin": "Longitud" if is_es else "Longitude",
+            "localidad": "Zona / Comuna" if is_es else "Zone / Commune",
+            "lat_plot": "Latitud" if is_es else "Latitude",
+            "lon_plot": "Longitud" if is_es else "Longitude",
             "harmonized_hotspots": "Focos de calor" if is_es else "Calibrated Hotspots",
             "harmonized_frp": "FRP (MW)"
         }
@@ -785,14 +884,14 @@ with col_map:
             style_kwarg = {"map_style": chosen_style} if hasattr(px, "scatter_map") else {"mapbox_style": chosen_style}
             fig_map = scatter_func(
                 map_agg,
-                lat="lat_bin",
-                lon="lon_bin",
+                lat="lat_plot",
+                lon="lon_plot",
                 size=value_col,
                 color=value_col,
-                size_max=34,
+                size_max=26,
                 color_continuous_scale=color_scale,
                 range_color=[0, hist_cell_max],
-                opacity=0.82,
+                opacity=0.85,
                 zoom=zoom_lvl,
                 center={"lat": center_lat, "lon": center_lon},
                 hover_name="localidad",
@@ -805,10 +904,10 @@ with col_map:
             style_kwarg = {"map_style": chosen_style} if hasattr(px, "density_map") else {"mapbox_style": chosen_style}
             fig_map = density_func(
                 map_agg,
-                lat="lat_bin",
-                lon="lon_bin",
+                lat="lat_plot",
+                lon="lon_plot",
                 z=value_col,
-                radius=30,
+                radius=26,
                 color_continuous_scale=color_scale,
                 range_color=[0, hist_cell_max],
                 opacity=0.78,
@@ -859,7 +958,7 @@ with col_map:
             )
             fig_map.update_traces(marker_line_width=0.6, marker_line_color="rgba(120,120,120,0.45)")
 
-        fig_map.update_layout(height=460, margin=dict(l=0, r=0, t=10, b=0))
+        fig_map.update_layout(height=470, margin=dict(l=0, r=0, t=10, b=0))
 
         try:
             chart_event = st.plotly_chart(fig_map, width='stretch', on_select="rerun", selection_mode="points", key="fire_map_chart")
@@ -871,11 +970,18 @@ with col_map:
         except TypeError:
             st.plotly_chart(fig_map, width='stretch')
 
+        exact_zone_display = ""
+        exact_comuna_name = ""
+
         if selected_idx != -1 and not map_agg.empty:
             sel_row = map_agg.loc[selected_idx]
-            s_lat, s_lon = float(sel_row["lat_bin"]), float(sel_row["lon_bin"])
-            gmaps_url = f"https://www.google.com/maps/search/?api=1&query={s_lat:.4f},{s_lon:.4f}"
-            firms_url = f"https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@{s_lon:.3f},{s_lat:.3f},11z"
+            s_lat, s_lon = float(sel_row["lat_plot"]), float(sel_row["lon_plot"])
+            osm_exact, osm_comuna = reverse_geocode_exact(round(s_lat, 4), round(s_lon, 4), is_es)
+            exact_zone_display = osm_exact if osm_exact else sel_row["localidad"]
+            exact_comuna_name = osm_comuna if osm_comuna else sel_row["comuna_ref"]
+
+            gmaps_url = f"https://www.google.com/maps/search/?api=1&query={s_lat:.5f},{s_lon:.5f}"
+            firms_url = f"https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@{s_lon:.4f},{s_lat:.4f},13z"
 
             if sel_row["zone_type"] == "industrial_desert":
                 origin_note = (
@@ -891,11 +997,11 @@ with col_map:
                 )
 
             st.info(
-                f"**Sector inspeccionado:** **{sel_row['localidad']}** (`{s_lat:.3f}°, {s_lon:.3f}°`) — "
+                f"**Ubicación exacta:** **{exact_zone_display}** (`{s_lat:.4f}°, {s_lon:.4f}°`) — "
                 f"**{sel_row['harmonized_hotspots']:,.0f}** {'focos calibrados' if is_es else 'calibrated hotspots'}\n\n"
                 f"{origin_note}\n\n"
-                f"[Abrir coordenadas en Google Maps]({gmaps_url})  |  "
-                f"[Ver en plataforma NASA FIRMS]({firms_url})"
+                f"[Abrir punto exacto en Google Maps]({gmaps_url})  |  "
+                f"[Inspeccionar en NASA FIRMS (zoom 13x)]({firms_url})"
             )
 
 with col_side:
@@ -904,25 +1010,34 @@ with col_side:
         if is_es:
             st.error("**Emergencias activas:** Si ves humo o fuego ahora mismo, llama gratis al **130 (CONAF)** o **132 (Bomberos)**.")
 
-            active_sector = (
-                map_agg.loc[selected_idx, "localidad"]
-                if (not df_map_source.empty and not map_agg.empty and selected_idx != -1)
-                else (map_agg.loc[0, "localidad"] if (not df_map_source.empty and not map_agg.empty) else region_display)
-            )
+            if not df_map_source.empty and not map_agg.empty:
+                if selected_idx != -1 and exact_zone_display:
+                    active_sector = exact_zone_display
+                    muni_target = f"de la Municipalidad de {exact_comuna_name}" if exact_comuna_name else "de la Municipalidad"
+                else:
+                    top_lat = float(map_agg.loc[0, "lat_plot"])
+                    top_lon = float(map_agg.loc[0, "lon_plot"])
+                    osm_top, osm_top_comuna = reverse_geocode_exact(round(top_lat, 4), round(top_lon, 4), True)
+                    active_sector = osm_top if osm_top else map_agg.loc[0, "localidad"]
+                    comuna_clean = osm_top_comuna if osm_top_comuna else map_agg.loc[0, "comuna_ref"]
+                    muni_target = f"de la Municipalidad de {comuna_clean}" if comuna_clean else "de la Municipalidad"
+            else:
+                active_sector = region_display
+                muni_target = "de la Municipalidad"
 
             st.markdown(
                 f"**Solicitud preventiva para tu comuna ({region_display}):**\n"
                 f"Copia este texto y envíalo antes de **{top3_names}** a tu municipalidad o a las instituciones de prevención:"
             )
             msg_muni = (
-                f"Estimado equipo de Emergencias de la Municipalidad:\n"
-                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} - {active_sector}) "
+                f"Estimado equipo de Emergencias {muni_target}:\n"
+                f"De acuerdo con los registros satelitales calibrados de NASA FIRMS (2000–2026), nuestra zona ({region_display} — {active_sector}) "
                 f"concentra el {top3_share:.0f}% de los incendios entre {top3_names}. "
                 f"Solicitamos informar el calendario de limpieza de maleza y mantención de cortafuegos preventivos para nuestro sector."
             )
-            st.text_area("Mensaje listo para copiar:", value=msg_muni, height=155)
+            st.text_area("Mensaje listo para copiar:", value=msg_muni, height=160)
 
-            mailto_subject = quote(f"Solicitud preventiva de cortafuegos - {active_sector} ({region_display})")
+            mailto_subject = quote(f"Solicitud preventiva de cortafuegos - {active_sector}")
             mailto_body = quote(msg_muni)
             mailto_link = f"mailto:consulta.oirs@conaf.cl,oirs@senapred.gob.cl?subject={mailto_subject}&body={mailto_body}"
 
@@ -960,9 +1075,9 @@ with col_side:
             mime="text/csv",
         )
         st.info(
-            "Las coordenadas (`lat_bin`, `lon_bin`) permiten identificar qué sectores rurales concentran mayor recurrencia histórica de fuego."
+            "Las coordenadas exactas (`lat_exact`, `lon_exact`) permiten cruzar cada foco con predios, caminos y cortafuegos en QGIS."
             if is_es else
-            "Grid coordinates (`lat_bin`, `lon_bin`) pinpoint which rural sectors suffer recurring fire activity."
+            "Exact coordinates (`lat_exact`, `lon_exact`) let municipal teams overlay hotspots with roads and firebreaks in QGIS."
         )
     else:
         st.subheader("Exportar Dataset Calibrado" if is_es else "Export Calibrated Dataset")
@@ -988,7 +1103,7 @@ with col_side:
 
 st.markdown("---")
 
-# 11. Guía Metodológica y Preguntas Clave (Sin exceso de íconos)
+# 12. Guía Metodológica y Preguntas Clave
 st.subheader("Guía de Uso, Satélites y Metodología" if is_es else "User Guide, Satellites & Methodology")
 
 tab_guide, tab_sat, tab_how, tab_faq = st.tabs(
@@ -1014,7 +1129,7 @@ with tab_guide:
             "2. **Paso 2 (Nivel de detalle):** Selecciona *Ciudadanía* para lenguaje cotidiano, *Municipios* para gestión preventiva o *Investigadores* para métricas técnicas.\n"
             "3. **Paso 3 (Período):** Usa los botones rápidos o desliza la barra para elegir un año (y opcionalmente un mes específico).\n"
             "4. **Paso 4 (Calendario):** Revisa la cuadrícula de 26 años. Cada rectángulo es un mes; las columnas más intensas muestran la temporada crítica anual de tu región.\n"
-            "5. **Paso 5 (Mapa):** Elige entre *Círculos de intensidad*, *Nube de calor* o *Cuadrícula técnica*, y selecciona cualquier sector para acercarte y verlo en Google Maps."
+            "5. **Paso 5 (Mapa):** Selecciona cualquier círculo en el mapa para identificar la **comuna y sector exacto**, acercarte a nivel de caminos y abrir el punto en Google Maps."
         )
     else:
         st.markdown(
@@ -1022,7 +1137,7 @@ with tab_guide:
             "2. **Step 2 (Detail level):** Pick *Citizens*, *Municipalities*, or *Researchers*.\n"
             "3. **Step 3 (Time period):** Use quick shortcuts or the year/month controls.\n"
             "4. **Step 4 (Calendar):** Read the 26-year monthly grid; each cell shows total detections for that month and year.\n"
-            "5. **Step 5 (Map):** Switch between *Intensity circles*, *Heat density cloud*, or *Scientific grid cells*, and pick any sector to inspect in Google Maps."
+            "5. **Step 5 (Map):** Select any circle on the map to identify the **exact commune and sector**, zoom to street level, and open in Google Maps."
         )
 
 with tab_sat:
@@ -1056,14 +1171,14 @@ with tab_how:
             "1. **Desduplicación orbital:** Se filtraron las pasadas redundantes cuando dos satélites observan el mismo incendio con minutos de diferencia.\n"
             "2. **Geometría óptica del píxel (`scan × track`):** Se calculó el área real observada en tierra cuando el sensor mira hacia los bordes del barrido (donde el píxel se estira hasta 9.6 veces).\n"
             "3. **Calibración mediante aprendizaje automático:** Usando los **14 años de operación simultánea (2012–2026)**, se entrenó un modelo *Gradient Boosting* con corrección de Duan para traducir MODIS a escala VIIRS (`R² lineal = 0.887`, sesgo acumulado `< 5%` en validación ciega).\n"
-            "4. **Visualización accesible:** Se integró el dataset calibrado en este calendario interactivo con escalas de color estándar y adaptadas para daltonismo."
+            "4. **Geocodificación y visualización accesible:** Se integró el dataset calibrado con identificación territorial exacta y escalas de color estándar y adaptadas para daltonismo."
         )
     else:
         st.markdown(
             "1. **Orbital de-duplication:** Removes redundant detections from overlapping satellite passes.\n"
             "2. **Optical pixel geometry (`scan × track`):** Accounts for off-nadir pixel stretching up to 9.6 km².\n"
             "3. **Cross-sensor Machine Learning:** Trains Gradient Boosting with Duan's smearing on the 2012–2026 overlap (`Linear R² = 0.887`, `< 5%` blind hindcast bias).\n"
-            "4. **Accessible interface:** Delivers tailored views with standard and colorblind-safe palettes."
+            "4. **Exact geocoding & accessible interface:** Delivers tailored views with standard and colorblind-safe palettes."
         )
 
 with tab_faq:
@@ -1073,10 +1188,10 @@ with tab_faq:
                 "Los satélites NASA FIRMS miden anomalías térmicas en superficie sin distinguir su origen. "
                 "En el norte de Chile, esas detecciones persistentes corresponden a fundiciones de cobre (como Chuquicamata), faenas mineras o plantas termosolares, no a incendios forestales."
             )
-        with st.expander("¿Por qué el mapa ofrece ver círculos, nube de calor o cuadrícula?"):
+        with st.expander("¿Qué precisión espacial tiene cada círculo en el mapa?"):
             st.write(
-                "Para unir 26 años de satélites distintos sin sesgo, los datos se agrupan en celdas de referencia. "
-                "Visualizarlos como círculos proporcionales o nube de calor facilita a cualquier persona ubicar el foco sin confundir el tamaño de la celda matemática con el tamaño real del incendio."
+                "Los satélites modernos VIIRS ubican el calor con una precisión de 375 metros. "
+                "En esta plataforma, cada círculo se posiciona en el centroide ponderado de las detecciones y consulta los límites administrativos para indicar la comuna y sector exacto."
             )
         with st.expander("¿Qué significa 'Lo normal (Mediana de 26 años)'?"):
             st.write(
@@ -1089,7 +1204,7 @@ with tab_faq:
     else:
         with st.expander("Why do hotspots appear in the northern desert (e.g., Calama)?"):
             st.write("NASA FIRMS detects surface thermal anomalies including copper smelters, mining operations, and solar plants.")
-        with st.expander("Why does the map offer circles, heat cloud, or grid cells?"):
-            st.write("Proportional circles and heat clouds make it intuitive for anyone to locate fire concentration without mistaking the statistical calibration cell for the physical size of a single fire.")
+        with st.expander("How accurate is each circle on the map?"):
+            st.write("Modern VIIRS sensors locate heat at 375 m resolution. Each circle is positioned at the fire-weighted centroid and reverse-geocoded to identify the exact commune and local sector.")
         with st.expander("What does 'Typical Year (26-year median)' mean?"):
             st.write("It is the middle value across 2000–2025, preventing extreme megafire years from skewing the baseline.")
