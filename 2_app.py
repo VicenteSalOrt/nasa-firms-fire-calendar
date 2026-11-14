@@ -20,7 +20,7 @@ def load_data():
 
 df = load_data()
 
-# 4. Barra Lateral: Selección de Territorio (Todo Chile + 16 Regiones + Coordenadas Libres)
+# 4. Límites y Polígonos Exactos de las 16 Regiones de Chile (evita que Concepción entre en Ñuble)
 REGIONS_BOUNDS = {
     "All Chile": (-56.0, -17.0, -76.0, -66.0),
     "Arica y Parinacota": (-19.25, -17.50, -70.50, -68.75),
@@ -28,18 +28,68 @@ REGIONS_BOUNDS = {
     "Antofagasta": (-26.10, -20.90, -70.80, -66.80),
     "Atacama": (-29.60, -25.25, -71.80, -68.25),
     "Coquimbo": (-32.30, -29.00, -71.80, -69.75),
-    "Valparaíso": (-33.90, -32.00, -72.00, -69.90),
-    "Región Metropolitana": (-34.30, -32.90, -71.80, -69.75),
-    "O'Higgins": (-35.05, -33.85, -72.20, -70.00),
+    "Valparaíso": (-33.90, -32.02, -71.95, -70.00),
+    "Región Metropolitana": (-34.28, -32.92, -71.45, -69.78),
+    "O'Higgins": (-35.02, -33.85, -72.15, -70.02),
     "Maule": (-36.55, -34.70, -72.85, -70.25),
-    "Ñuble": (-37.25, -36.00, -73.00, -71.00),
-    "Biobío": (-38.50, -36.40, -73.80, -71.00),
+    "Ñuble": (-37.22, -36.00, -72.85, -71.00),
+    "Biobío": (-38.45, -36.52, -73.75, -71.05),
     "La Araucanía": (-39.65, -37.55, -73.60, -70.80),
     "Los Ríos": (-40.70, -39.25, -73.80, -71.50),
     "Los Lagos": (-44.10, -40.25, -74.90, -71.50),
     "Aysén": (-49.30, -43.60, -75.80, -71.00),
     "Magallanes": (-56.00, -48.50, -75.80, -66.20),
 }
+
+# Polígonos precisos en la zona central para separar fronteras diagonales (Ñuble vs Biobío, RM vs Valparaíso, etc.)
+REGION_POLYGONS = {
+    "Valparaíso": [
+        (-71.95, -32.02), (-70.00, -32.02), (-70.00, -33.15), (-70.65, -33.05),
+        (-71.15, -33.25), (-71.40, -33.55), (-71.85, -33.90), (-71.95, -32.02)
+    ],
+    "Región Metropolitana": [
+        (-71.40, -32.92), (-69.78, -32.92), (-69.78, -34.28), (-71.45, -34.20),
+        (-71.40, -33.55), (-71.15, -33.25), (-70.65, -33.05), (-71.40, -32.92)
+    ],
+    "O'Higgins": [
+        (-72.15, -33.85), (-71.45, -33.85), (-71.45, -34.20), (-70.02, -34.15),
+        (-70.25, -35.02), (-72.15, -34.95), (-72.15, -33.85)
+    ],
+    "Maule": [
+        (-72.85, -34.70), (-70.25, -34.70), (-70.35, -36.55), (-71.00, -36.00),
+        (-72.85, -36.00), (-72.85, -34.70)
+    ],
+    "Ñuble": [
+        (-72.85, -36.00), (-71.00, -36.00), (-71.15, -37.22), (-72.25, -37.22),
+        (-72.32, -36.88), (-72.58, -36.82), (-72.62, -36.68), (-72.83, -36.52),
+        (-72.85, -36.00)
+    ],
+    "Biobío": [
+        (-73.75, -36.52), (-72.83, -36.52), (-72.62, -36.68), (-72.58, -36.82),
+        (-72.32, -36.88), (-72.25, -37.22), (-71.15, -37.22), (-71.05, -38.45),
+        (-73.75, -38.45), (-73.75, -36.52)
+    ],
+}
+
+def filter_by_polygon(df_in, poly):
+    lons = df_in['lon_bin'].to_numpy()
+    lats = df_in['lat_bin'].to_numpy()
+    inside = np.zeros(len(df_in), dtype=bool)
+    n = len(poly)
+    p1x, p1y = poly[0]
+    for i in range(1, n + 1):
+        p2x, p2y = poly[i % n]
+        cond1 = (lats > min(p1y, p2y)) & (lats <= max(p1y, p2y)) & (lons <= max(p1x, p2x))
+        if np.any(cond1):
+            if p1y != p2y:
+                xinters = (lats[cond1] - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                toggle = (p1x == p2x) | (lons[cond1] <= xinters)
+            else:
+                toggle = np.ones(np.sum(cond1), dtype=bool)
+            idx = np.where(cond1)[0][toggle]
+            inside[idx] = ~inside[idx]
+        p1x, p1y = p2x, p2y
+    return df_in[inside]
 
 preset_keys = list(REGIONS_BOUNDS.keys()) + ["Custom Coordinates"]
 preset_labels = {
@@ -79,7 +129,7 @@ else:
     lon_min = st.sidebar.number_input("Longitud Mínima" if is_es else "Min Longitude", value=-73.8, format="%.2f")
     lon_max = st.sidebar.number_input("Longitud Máxima" if is_es else "Max Longitude", value=-71.0, format="%.2f")
 
-# 5. Encabezado Principal + Selector de Público Objetivo (Adapta toda la interfaz)
+# 5. Encabezado Principal + Selector de Público Objetivo
 st.title(
     "🔥 Calendario Satelital de Incendios en Chile (2000–2026)"
     if is_es else
@@ -104,7 +154,6 @@ audience = st.radio(
     label_visibility="collapsed"
 )
 
-# Métrica: solo se muestra selector técnico en perfil Municipal o Científico
 if audience == "citizen":
     value_col = "harmonized_hotspots"
     unit_label = "Focos de calor" if is_es else "Fire hotspots"
@@ -155,22 +204,24 @@ elif audience == "municipal":
 else:
     if is_es:
         st.info(
-            "🔬 **Vista Científica y Analítica:** Serie temporal armonizada de **875,848 detecciones NASA FIRMS (2000–2026)** sobre malla de `0.25° × 0.25°`. "
+            "🔬 **Vista Científica y Analítica:** Serie temporal armonizada de **detecciones NASA FIRMS (2000–2026)**. "
             "Combina registros MODIS (1 km, calibrados mediante Gradient Boosting con geometría `scan × track` y corrección de Duan; "
             "`R² fuera de muestra = 0.887`, sesgo en hindcast temporal ciego `+4.88%`) con observaciones VIIRS (375 m) desduplicadas orbitalmente."
         )
     else:
         st.info(
-            "🔬 **Scientific & Analytical View:** Cross-calibrated time series of **875,848 NASA FIRMS detections (2000–2026)** on a `0.25° × 0.25°` grid. "
+            "🔬 **Scientific & Analytical View:** Cross-calibrated time series of **NASA FIRMS detections (2000–2026)**. "
             "Aligns pre-2012 MODIS (1 km, calibrated via Gradient Boosting with `scan × track` optical geometry and Duan's smearing; "
             "`Out-of-sample R² = 0.887`, blind temporal hindcast bias `+4.88%`) with orbitally de-duplicated VIIRS (375 m) observations."
         )
 
-# 7. Filtrado de datos y cálculos temporales
+# 7. Filtrado Espacial (Caja + Polígono Regional Exacto)
 df_filtered = df[
     (df['lat_bin'].between(lat_min, lat_max)) &
     (df['lon_bin'].between(lon_min, lon_max))
 ]
+if preset in REGION_POLYGONS:
+    df_filtered = filter_by_polygon(df_filtered, REGION_POLYGONS[preset])
 
 if df_filtered.empty:
     st.warning(
@@ -238,7 +289,6 @@ if month_idx_choice == 0:
         ("Mediana Anual (2000–2025)" if is_es else "2000–2025 Annual Median")
     )
     df_map_source = df_filtered[df_filtered['year'] == selected_year]
-    ref_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
 else:
     month_series = monthly_totals[monthly_totals['month'] == month_idx_choice].set_index('year')[value_col].dropna()
     total_selected = month_series.loc[selected_year] if selected_year in month_series.index else 0.0
@@ -250,9 +300,7 @@ else:
         (f"Mediana Histórica ({month_names[month_idx_choice - 1]})" if is_es else f"Historical Median ({month_names[month_idx_choice - 1]})")
     )
     df_map_source = df_filtered[(df_filtered['year'] == selected_year) & (df_filtered['month'] == month_idx_choice)]
-    ref_cell_max = float(df_filtered[value_col].max())
 
-ref_cell_max = max(ref_cell_max, 1.0)
 region_display = preset_labels[preset]
 
 # 8. Semáforo de Alerta Adaptado al Público
@@ -279,7 +327,7 @@ if median_baseline > 0:
                 f"🔴 **EMERGENCIA / ANOMALÍA EXTREMA en {region_display} ({period_title}):** "
                 f"Actividad **{pct_diff:+.1f}%** sobre la mediana histórica (**{ratio:.1f}x** lo habitual).\n\n"
                 f"📋 **Priorización Operativa:** El **{top3_share:.0f}%** de la carga anual de fuego ocurre en **{top3_names}**. "
-                f"Se recomienda activar alerta temprana comunal y reforzar cortafuegos en las celdas amarillas del mapa inferior."
+                f"Se recomienda activar alerta temprana comunal y reforzar cortafuegos en los cuadrantes amarillos del mapa inferior."
                 if is_es else
                 f"🔴 **EMERGENCY / EXTREME ANOMALY in {region_display} ({period_title}):** "
                 f"Activity is **{pct_diff:+.1f}%** above historical median (**{ratio:.1f}x** baseline).\n\n"
@@ -366,7 +414,6 @@ calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=valu
 max_monthly_all_time = max(float(monthly_totals[value_col].max()), 1.0)
 
 if audience == "citizen":
-    # VISTA CIUDADANA: Calendario grande y claro + Mapa simple + Diccionario en lenguaje cotidiano
     st.subheader("🗓️ ¿En qué meses ocurren los incendios? (Calendario 2000–2026)" if is_es else "🗓️ When Do Wildfires Happen? (2000–2026 Calendar)")
     st.caption(
         "Cada fila es un año y cada columna es un mes. **Azul oscuro** = mes tranquilo | **Amarillo brillante** = emergencia grave (colores aptos para daltonismo)."
@@ -385,15 +432,14 @@ if audience == "citizen":
     st.plotly_chart(fig_cal, width='stretch')
 
     st.markdown("---")
-    st.subheader(f"🗺️ ¿Dónde ocurrió el fuego? — {period_title}" if is_es else f"🗺️ Where Did Fires Happen? — {period_title}")
+    st.subheader(f"🗺️ ¿Qué zonas fueron afectadas por el fuego? — {period_title}" if is_es else f"🗺️ Which Areas Were Affected by Fire? — {period_title}")
     st.caption(
-        "Los **círculos grandes y amarillos** muestran los sectores con mayor concentración de incendios."
+        "Los **cuadrantes amarillos** muestran toda la extensión territorial donde se concentraron los incendios."
         if is_es else
-        "**Large yellow circles** show areas with the highest concentration of active fires."
+        "**Bright yellow zones** show the full geographic footprint where wildfires concentrated."
     )
 
 else:
-    # VISTA MUNICIPAL Y CIENTÍFICA: Calendario + Curva Estacional lado a lado
     col_cal, col_curve = st.columns([1.4, 1])
 
     with col_cal:
@@ -452,7 +498,6 @@ else:
         )
         st.plotly_chart(fig_curve, width='stretch')
 
-    # El gráfico técnico de continuidad MODIS->VIIRS solo se muestra en el perfil Científico
     if audience == "scientist":
         st.markdown("---")
         st.subheader(
@@ -497,7 +542,7 @@ else:
     st.markdown("---")
     st.subheader(f"🗺️ Mapa Espacial de Intensidad — {period_title}" if is_es else f"🗺️ Spatial Fire Intensity Map — {period_title}")
 
-# 11. Mapa Espacial (Común a los 3 perfiles, con tarjeta lateral adaptada al público)
+# 11. Mapa Espacial de Extensión Real (Polígonos de Celdas para todos los incendios)
 col_map, col_side = st.columns([2.2, 1])
 
 with col_map:
@@ -512,29 +557,66 @@ with col_map:
             harmonized_hotspots=('harmonized_hotspots', 'sum'),
             harmonized_frp=('harmonized_frp', 'sum')
         ).reset_index()
+        map_agg["cell_id"] = map_agg.index.astype(str)
 
-        center_lat = (lat_min + lat_max) / 2.0
-        center_lon = (lon_min + lon_max) / 2.0
-        span = max(abs(lat_max - lat_min), abs(lon_max - lon_min))
-        zoom_lvl = float(np.clip(8.2 - np.log2(max(span, 0.5)), 3.2, 7.5))
+        # Auto-detectar resolución de malla (ej. 0.025° ~2.7 km o 0.25° ~27 km)
+        unique_lats = np.sort(df['lat_bin'].unique())
+        diffs = np.diff(unique_lats)
+        diffs = diffs[diffs > 1e-5]
+        grid_res = float(np.min(diffs)) if len(diffs) > 0 else 0.25
+        half = grid_res / 2.0
 
-        max_bubble_px = 30.0
-        map_func = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
-        style_kwarg = {"map_style": "carto-darkmatter"} if hasattr(px, "scatter_map") else {"mapbox_style": "carto-darkmatter"}
+        features = []
+        for _, row in map_agg.iterrows():
+            lat_c, lon_c = float(row["lat_bin"]), float(row["lon_bin"])
+            poly = [[
+                [lon_c - half, lat_c - half],
+                [lon_c + half, lat_c - half],
+                [lon_c + half, lat_c + half],
+                [lon_c - half, lat_c + half],
+                [lon_c - half, lat_c - half],
+            ]]
+            features.append({
+                "type": "Feature",
+                "id": row["cell_id"],
+                "geometry": {"type": "Polygon", "coordinates": poly},
+                "properties": {"cell_id": row["cell_id"]}
+            })
+        geojson_grid = {"type": "FeatureCollection", "features": features}
 
-        hover_cols = {"lat_bin": ":.2f", "lon_bin": ":.2f", "harmonized_hotspots": ":,.0f"}
+        period_max = max(float(map_agg[value_col].max()), 1.0)
+
+        # Centrado exacto en los datos de la región seleccionada
+        if preset != "All Chile" and preset != "Custom Coordinates":
+            center_lat = float((df_filtered['lat_bin'].min() + df_filtered['lat_bin'].max()) / 2.0)
+            center_lon = float((df_filtered['lon_bin'].min() + df_filtered['lon_bin'].max()) / 2.0)
+            span = max(
+                float(df_filtered['lat_bin'].max() - df_filtered['lat_bin'].min()) + grid_res,
+                float(df_filtered['lon_bin'].max() - df_filtered['lon_bin'].min()) + grid_res
+            )
+        else:
+            center_lat = (lat_min + lat_max) / 2.0
+            center_lon = (lon_min + lon_max) / 2.0
+            span = max(abs(lat_max - lat_min), abs(lon_max - lon_min))
+
+        zoom_lvl = float(np.clip(8.3 - np.log2(max(span, 0.4)), 3.2, 8.2))
+
+        choro_func = px.choropleth_map if hasattr(px, "choropleth_map") else px.choropleth_mapbox
+        style_kwarg = {"map_style": "carto-darkmatter"} if hasattr(px, "choropleth_map") else {"mapbox_style": "carto-darkmatter"}
+
+        hover_cols = {"cell_id": False, "lat_bin": ":.3f", "lon_bin": ":.3f", "harmonized_hotspots": ":,.0f"}
         if audience != "citizen":
             hover_cols["harmonized_frp"] = ":,.1f"
 
-        fig_map = map_func(
+        fig_map = choro_func(
             map_agg,
-            lat="lat_bin",
-            lon="lon_bin",
-            size=value_col,
+            geojson=geojson_grid,
+            locations="cell_id",
+            featureidkey="id",
             color=value_col,
             color_continuous_scale="Cividis",
-            range_color=[0, ref_cell_max],
-            size_max=int(max_bubble_px),
+            range_color=[0, period_max],
+            opacity=0.68,
             zoom=zoom_lvl,
             center={"lat": center_lat, "lon": center_lon},
             hover_data=hover_cols,
@@ -546,13 +628,7 @@ with col_map:
             },
             **style_kwarg
         )
-        fig_map.update_traces(
-            marker=dict(
-                sizeref=2.0 * ref_cell_max / (max_bubble_px ** 2),
-                sizemode='area',
-                sizemin=4
-            )
-        )
+        fig_map.update_traces(marker_line_width=0.5, marker_line_color="rgba(255,255,255,0.22)")
         fig_map.update_layout(height=480, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_map, width='stretch')
 
