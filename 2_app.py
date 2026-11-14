@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -87,13 +88,14 @@ with col_ctrl1:
 with col_ctrl2:
     selected_month_label = st.selectbox("Filter Map & KPIs by Month:", month_options, index=0)
 
-# Cálculo de series mensuales completas (26 años)
+# Cálculo de series mensuales completas (26 años), enmascarando meses futuros (Dic 2026)
 all_years = range(int(min(years_available)), int(max(years_available)) + 1)
 full_grid = pd.MultiIndex.from_product([all_years, range(1, 13)], names=['year', 'month']).to_frame().reset_index(drop=True)
 monthly_raw = df_filtered.groupby(['year', 'month'])[value_col].sum().reset_index()
 monthly_totals = pd.merge(full_grid, monthly_raw, on=['year', 'month'], how='left').fillna(0)
+monthly_totals.loc[(monthly_totals['year'] == 2026) & (monthly_totals['month'] > 11), value_col] = np.nan
 
-# KPIs dinámicos y referencia máxima histórica fija (evita re-escalado engañoso)
+# KPIs dinámicos y referencia máxima histórica fija
 if selected_month_label == "All Year (Annual)":
     annual_totals = monthly_totals.groupby('year')[value_col].sum()
     total_selected = annual_totals.loc[selected_year]
@@ -103,30 +105,36 @@ if selected_month_label == "All Year (Annual)":
     ref_cell_max = float(df_filtered.groupby(['year', 'lat_bin', 'lon_bin'])[value_col].sum().max())
 else:
     month_idx = month_names.index(selected_month_label) + 1
-    month_series = monthly_totals[monthly_totals['month'] == month_idx].set_index('year')[value_col]
-    total_selected = month_series.loc[selected_year]
+    month_series = monthly_totals[monthly_totals['month'] == month_idx].set_index('year')[value_col].dropna()
+    total_selected = month_series.loc[selected_year] if selected_year in month_series.index else 0.0
     median_baseline = month_series.median()
     period_title = f"{selected_month_label} {selected_year}"
     df_map_source = df_filtered[(df_filtered['year'] == selected_year) & (df_filtered['month'] == month_idx)]
     ref_cell_max = float(df_filtered[value_col].max())
 
 ref_cell_max = max(ref_cell_max, 1.0)
-anomaly_pct = ((total_selected - median_baseline) / median_baseline * 100) if median_baseline > 0 else 0
+
+if median_baseline > 0:
+    anomaly_str = f"{((total_selected - median_baseline) / median_baseline * 100):+.1f}%"
+elif total_selected > 0:
+    anomaly_str = "Above 0 baseline"
+else:
+    anomaly_str = "0.0% (Normal)"
 
 kpi1, kpi2, kpi3 = st.columns(3)
 kpi1.metric(f"Activity in {period_title}", f"{total_selected:,.0f} {unit_label}")
 kpi2.metric(f"26-Year Median ({selected_month_label.split()[0]})", f"{median_baseline:,.0f} {unit_label}")
-kpi3.metric("Anomaly vs. Median", f"{anomaly_pct:+.1f}%", delta_color="inverse")
+kpi3.metric("Anomaly vs. Median", anomaly_str)
 
 st.markdown("---")
 
-# 5. Calendario de 26 Años + Curva Estacional Comparativa (con eje Y fijo)
+# 5. Calendario de 26 Años + Curva Estacional Comparativa
 col_cal, col_curve = st.columns([1.4, 1])
 
 with col_cal:
     st.subheader("🗓️ 26-Year Burning Activity Calendar")
-    calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=value_col).fillna(0)
-    calendar_pivot = calendar_pivot.reindex(columns=range(1, 13), fill_value=0)
+    calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=value_col)
+    calendar_pivot = calendar_pivot.reindex(columns=range(1, 13))
 
     fig_cal = px.imshow(
         calendar_pivot,
@@ -183,7 +191,7 @@ with col_curve:
 
 st.markdown("---")
 
-# 6. Mapa Espacial Normalizado a la Escala Histórica de 26 Años
+# 6. Mapa Espacial Normalizado con Zoom Dinámico y Visibilidad Mínima
 col_map, col_dl = st.columns([2.2, 1])
 
 with col_map:
@@ -196,11 +204,19 @@ with col_map:
             harmonized_frp=('harmonized_frp', 'sum')
         ).reset_index()
 
-        center_lat = map_agg['lat_bin'].mean()
-        center_lon = map_agg['lon_bin'].mean()
-        zoom_lvl = 4 if preset == "All Chile" else 6
-        max_bubble_px = 30.0
+        center_lat = (lat_min + lat_max) / 2.0
+        center_lon = (lon_min + lon_max) / 2.0
+        span = max(abs(lat_max - lat_min), abs(lon_max - lon_min))
+        if span > 20:
+            zoom_lvl = 3.2
+        elif span > 8:
+            zoom_lvl = 4.8
+        elif span > 3:
+            zoom_lvl = 5.8
+        else:
+            zoom_lvl = 6.8
 
+        max_bubble_px = 30.0
         map_func = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
         style_kwarg = {"map_style": "carto-darkmatter"} if hasattr(px, "scatter_map") else {"mapbox_style": "carto-darkmatter"}
 
@@ -229,11 +245,11 @@ with col_map:
             },
             **style_kwarg
         )
-        # Ancla el área física de los círculos al máximo histórico de 26 años
         fig_map.update_traces(
             marker=dict(
                 sizeref=2.0 * ref_cell_max / (max_bubble_px ** 2),
-                sizemode='area'
+                sizemode='area',
+                sizemin=4
             )
         )
         fig_map.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
