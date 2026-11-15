@@ -737,7 +737,7 @@ df_map_source = df_filtered[
 region_display = preset_labels[preset]
 
 # ==============================================================================
-# PASO 3: RESULTADOS, DIAGNÓSTICO Y GRÁFICAS MEJORADAS
+# PASO 3: RESULTADOS, DIAGNÓSTICO Y CALENDARIO HISTÓRICO (2026 ARRIBA -> 2000 ABAJO)
 # ==============================================================================
 with st.container(border=True):
     st.markdown(
@@ -869,28 +869,40 @@ with st.container(border=True):
         unsafe_allow_html=True
     )
 
-    calendar_pivot = monthly_totals.pivot(index='year', columns='month', values=value_col).reindex(columns=range(1, 13))
+    # Matriz ordenada: 2026 arriba -> 2000 abajo (índices discretos para evitar rangos 0..2026)
+    calendar_pivot = (
+        monthly_totals.pivot(index='year', columns='month', values=value_col)
+        .reindex(columns=range(1, 13))
+        .sort_index(ascending=False)
+    )
     max_monthly_all_time = max(float(monthly_totals[value_col].max()), 1.0)
     plotly_mobile_cfg = {"displayModeBar": False, "responsive": True}
 
     def build_enhanced_calendar(height_px):
-        fig_c = px.imshow(
-            calendar_pivot,
-            labels=dict(x="Mes" if is_es else "Month", y="Año" if is_es else "Year", color=unit_label),
-            x=month_names,
-            y=calendar_pivot.index.astype(str),
-            color_continuous_scale=color_scale,
-            aspect="auto"
-        )
-        fig_c.update_traces(
-            xgap=2,
-            ygap=2,
-            hovertemplate=(
-                f"<b>%{{y}} · %{{x}}</b><br>{unit_label}: <b>%{{z:,.1f}}</b><extra></extra>"
+        years_list = [int(y) for y in calendar_pivot.index]
+        y_idx = list(range(len(years_list)))
+        y_lbl = [str(y) for y in years_list]
+        z_vals = calendar_pivot.to_numpy()
+        custom_yr = np.array([[lbl] * 12 for lbl in y_lbl])
+
+        fig_c = go.Figure(
+            data=go.Heatmap(
+                z=z_vals,
+                x=month_names,
+                y=y_idx,
+                customdata=custom_yr,
+                colorscale=color_scale,
+                xgap=2,
+                ygap=2,
+                colorbar=dict(thickness=12, len=0.88, title=unit_label),
+                hovertemplate=(
+                    f"<b>%{{customdata}} · %{{x}}</b><br>{unit_label}: <b>%{{z:,.1f}}</b><extra></extra>"
+                )
             )
         )
-        if selected_year in calendar_pivot.index:
-            yr_pos = list(calendar_pivot.index).index(selected_year)
+
+        if selected_year in years_list:
+            yr_pos = years_list.index(selected_year)
             fig_c.add_shape(
                 type="rect",
                 x0=-0.5,
@@ -900,21 +912,30 @@ with st.container(border=True):
                 line=dict(color="#00B4D8", width=2.8),
                 fillcolor="rgba(0,0,0,0)"
             )
+
         fig_c.update_layout(
             height=height_px,
-            margin=dict(l=4, r=4, t=10, b=4),
+            margin=dict(l=4, r=4, t=28, b=4),
             font=dict(size=chart_font_size),
-            coloraxis_colorbar=dict(thickness=12, len=0.88, title=unit_label),
-            xaxis=dict(side="top")
+            xaxis=dict(side="top", showgrid=False, zeroline=False),
+            yaxis=dict(
+                title="Año" if is_es else "Year",
+                tickmode="array",
+                tickvals=y_idx,
+                ticktext=y_lbl,
+                range=[len(y_idx) - 0.5, -0.5],
+                showgrid=False,
+                zeroline=False
+            )
         )
         return fig_c
 
     if audience == "citizen":
-        st.plotly_chart(build_enhanced_calendar(420), width='stretch', config=plotly_mobile_cfg)
+        st.plotly_chart(build_enhanced_calendar(500), width='stretch', config=plotly_mobile_cfg)
     else:
         col_cal, col_curve = st.columns([1.35, 1])
         with col_cal:
-            st.plotly_chart(build_enhanced_calendar(440), width='stretch', config=plotly_mobile_cfg)
+            st.plotly_chart(build_enhanced_calendar(500), width='stretch', config=plotly_mobile_cfg)
 
         with col_curve:
             stats_monthly = monthly_totals.groupby('month')[value_col].agg(
@@ -965,7 +986,7 @@ with st.container(border=True):
                 )
 
             fig_curve.update_layout(
-                height=440,
+                height=500,
                 margin=dict(l=4, r=4, t=36, b=4),
                 font=dict(size=chart_font_size),
                 hovermode="x unified",
@@ -1354,7 +1375,7 @@ with st.container(border=True):
             if map_style_choice == "satellite":
                 sat_layers = [
                     {"below": "traces", "sourcetype": "raster", "sourceattribution": "Esri World Imagery", "source": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"]},
-                    {"below": "traces", "sourcetype": "raster", "source": ["https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"]},
+                    {"below": "traces", "sourcetype": "raster", "sourceattribution": "Esri Reference", "source": ["https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"]},
                 ]
                 if hasattr(px, "scatter_map"):
                     fig_map.update_layout(map_layers=sat_layers)
@@ -1445,7 +1466,6 @@ with st.container(border=True):
 
     with col_side:
         if audience == "citizen":
-            # Resolver sector y datos locales tanto en Español como en Inglés
             if not map_agg.empty:
                 if selected_idx != -1 and exact_zone_display:
                     active_sector = exact_zone_display
@@ -1603,7 +1623,7 @@ with st.container(border=True):
             st.info("Gradient Boosting (`scan × track` + Duan). `R² lineal = 0.887`, hindcast ciego 2012–2015 `R² = 0.784` (`+4.88%` sesgo).")
 
 # ==============================================================================
-# PASO 5: GUÍA VISUAL DE PREVENCIÓN Y PREGUNTAS FRECUENTES (Responsivo en Móvil)
+# PASO 5: GUÍA VISUAL DE PREVENCIÓN Y PREGUNTAS FRECUENTES
 # ==============================================================================
 with st.container(border=True):
     st.markdown(
