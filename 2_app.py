@@ -46,6 +46,47 @@ st.markdown(
         line-height: 1.25;
     }
 
+    /* Bloque de Bienvenida y Propuesta de Valor (Función + 3 Audiencias) */
+    .hero-purpose-box {
+        border-radius: 14px;
+        padding: 14px 16px;
+        background: linear-gradient(135deg, rgba(215,48,31,0.10) 0%, rgba(31,111,235,0.10) 100%);
+        border: 1.5px solid rgba(255,107,53,0.40);
+        margin: 4px 0 10px 0;
+    }
+    .hero-purpose-title {
+        font-size: 1.02rem;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+    .hero-purpose-desc {
+        font-size: 0.91rem;
+        line-height: 1.42;
+        opacity: 0.94;
+        margin-bottom: 10px;
+    }
+    .audience-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .audience-card {
+        border-radius: 11px;
+        padding: 11px 12px;
+        background: rgba(128, 140, 165, 0.10);
+        border: 1px solid rgba(128, 140, 165, 0.28);
+    }
+    .audience-card-title {
+        font-weight: 800;
+        font-size: 0.93rem;
+        margin-bottom: 4px;
+    }
+    .audience-card-text {
+        font-size: 0.84rem;
+        line-height: 1.36;
+        opacity: 0.90;
+    }
+
     /* Barra de flujo de 5 pasos responsiva (Desktop: 5 cols, Móvil: 2 cols) */
     .stepper-grid {
         display: grid;
@@ -198,6 +239,10 @@ st.markdown(
         }
         .step-title {
             font-size: 1.12rem !important;
+        }
+        .audience-grid {
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+            gap: 8px;
         }
         .stepper-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -424,12 +469,80 @@ with head_title:
         "Harmonized Wildfire Activity Calendar"
     )
     st.caption(
-        "26 años de datos NASA calibrados (2000–2026) · Sigue los 5 pasos para explorar tu región y enviar alertas preventivas."
+        "26 años de datos satelitales NASA calibrados (2000–2026) · Inteligencia abierta para prevenir incendios en las 16 regiones de Chile."
         if is_es else
-        "26 years of calibrated NASA data (2000–2026) · Follow the 5 steps below to explore your region and send preventive alerts."
+        "26 years of calibrated NASA satellite data (2000–2026) · Open wildfire intelligence across all 16 regions of Chile."
     )
 
-# 6. Mapa Visual de Avance HTML/CSS Responsivo (Desktop 5-col / Celular 2-col)
+# 6. Propósito de la Plataforma y Cómo Ayuda a Personas, Municipalidades y Científicos
+if is_es:
+    st.markdown(
+        """
+        <div class="hero-purpose-box">
+            <div class="hero-purpose-title">🛰️ ¿Cuál es la función de esta plataforma?</div>
+            <div class="hero-purpose-desc">
+                Unifica y calibra mediante Machine Learning <b>26 años de detecciones térmicas de satélites NASA (MODIS + VIIRS, 2000–2026)</b>
+                en todo Chile, eliminando el salto artificial entre sensores para identificar exactamente <b>cuándo y dónde</b> se concentran los incendios y transformar esa evidencia en prevención territorial.
+            </div>
+            <div class="audience-grid">
+                <div class="audience-card">
+                    <div class="audience-card-title">👥 Para Personas y Comunidades</div>
+                    <div class="audience-card-text">
+                        Muestra los <b>3 meses más críticos</b> de tu sector, ofrece diagnóstico con <b>audio y lectura accesible</b>, y redacta en <b>1 clic un correo oficial</b> para exigir cortafuegos a CONAF, SENAPRED y tu municipio.
+                    </div>
+                </div>
+                <div class="audience-card">
+                    <div class="audience-card-title">🏛️ Para Municipalidades y Emergencias</div>
+                    <div class="audience-card-text">
+                        Ubica los puntos de mayor recurrencia histórica con <b>anillos de proximidad de 5 y 10 km</b> y permite descargar <b>tablas georreferenciadas (CSV)</b> listas para planificar cortafuegos en <b>QGIS</b>.
+                    </div>
+                </div>
+                <div class="audience-card">
+                    <div class="audience-card-title">🔬 Para Científicos e Investigadores</div>
+                    <div class="audience-card-text">
+                        Entrega series temporales armonizadas sin sesgo instrumental (<b>R² = 0.887</b>), <b>bandas de normalidad (P25–P75)</b>, potencia radiativa (<b>FRP en MW</b>) y descarga directa de celdas calibradas.
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        """
+        <div class="hero-purpose-box">
+            <div class="hero-purpose-title">🛰️ What does this platform do?</div>
+            <div class="hero-purpose-desc">
+                It harmonizes <b>26 years of NASA thermal satellite detections (MODIS + VIIRS, 2000–2026)</b> across all 16 regions of Chile
+                using Machine Learning—removing artificial sensor jumps to pinpoint <b>when and where</b> wildfires concentrate and turning satellite data into preventive action.
+            </div>
+            <div class="audience-grid">
+                <div class="audience-card">
+                    <div class="audience-card-title">👥 For Citizens & Communities</div>
+                    <div class="audience-card-text">
+                        Reveals your neighborhood's <b>top 3 peak fire months</b>, provides <b>audio & accessible summaries</b>, and drafts a <b>1-click email</b> to request firebreaks from CONAF, SENAPRED, and local municipalities.
+                    </div>
+                </div>
+                <div class="audience-card">
+                    <div class="audience-card-title">🏛️ For Municipalities & Planners</div>
+                    <div class="audience-card-text">
+                        Pinpoints recurring wildfire hotspots with <b>5 km & 10 km proximity rings</b> and exports <b>georeferenced CSV datasets</b> ready for firebreak planning in <b>QGIS</b>.
+                    </div>
+                </div>
+                <div class="audience-card">
+                    <div class="audience-card-title">🔬 For Scientists & Researchers</div>
+                    <div class="audience-card-text">
+                        Provides bias-corrected multi-sensor time series (<b>R² = 0.887</b>), <b>26-year confidence bands (P25–P75)</b>, Fire Radiative Power (<b>FRP in MW</b>), and downloadable calibrated cells.
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# 7. Mapa Visual de Avance HTML/CSS Responsivo (Desktop 5-col / Celular 2-col)
 s_items = (
     [
         ("1", "#D7301F", "Región y Perfil", "Zona y nivel"),
